@@ -77,6 +77,7 @@ final class DictationEngine: ObservableObject {
 
     private var hasStarted = false
     private var recordingMode: RecordingMode?
+    private var insertionTarget: TextInjector.Target?
     private var modelPreparationTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
 
@@ -283,6 +284,7 @@ final class DictationEngine: ObservableObject {
 
     func rerunHistoryEntry(_ id: UUID) {
         guard canRerunHistory else { return }
+        let insertionTarget = TextInjector.captureTarget()
         lastError = nil
         activity = .transcribing
         overlay.show(.transcribing)
@@ -309,18 +311,27 @@ final class DictationEngine: ObservableObject {
                 if appendTrailingSpace, !insertion.isEmpty {
                     insertion.append(" ")
                 }
-                TextInjector.inject(insertion)
+                let insertionResult = await TextInjector.inject(
+                    insertion,
+                    into: insertionTarget
+                )
                 let latency = ProcessInfo.processInfo.systemUptime - started
                 lastLatency = latency
                 activity = .idle
-                overlay.hide()
+                if let insertionError = insertionResult.errorMessage {
+                    lastError = insertionError
+                    overlay.show(.error)
+                    overlay.hide(after: 0.9)
+                } else {
+                    overlay.hide()
+                }
                 history.updateAfterRerun(
                     id: id,
                     transcript: transcript,
                     modelID: model.id,
                     modelName: model.name,
                     latency: latency,
-                    errorMessage: nil
+                    errorMessage: insertionResult.errorMessage
                 )
             } catch {
                 guard !Task.isCancelled else { return }
@@ -537,6 +548,7 @@ final class DictationEngine: ObservableObject {
             let recording = capture.stop(keepActive: keepMicrophoneActive)
             capture.recycle(recording.samples)
             recordingMode = nil
+            insertionTarget = nil
             activity = .idle
             overlay.hide(after: 0)
 
@@ -546,8 +558,10 @@ final class DictationEngine: ObservableObject {
     }
 
     private func startRecording(mode: RecordingMode) {
+        let target = TextInjector.captureTarget()
         do {
             try capture.start()
+            insertionTarget = target
             recordingMode = mode
             activity = .recording
             overlay.show(.recording)
@@ -564,6 +578,8 @@ final class DictationEngine: ObservableObject {
     private func stopAndTranscribe() {
         let recording = capture.stop(keepActive: keepMicrophoneActive)
         recordingMode = nil
+        let insertionTarget = self.insertionTarget
+        self.insertionTarget = nil
         let model = selectedModel
 
         if let integrityIssue = recording.integrityIssue {
@@ -599,17 +615,25 @@ final class DictationEngine: ObservableObject {
                 if appendTrailingSpace, !insertion.isEmpty {
                     insertion.append(" ")
                 }
-                TextInjector.inject(insertion)
+                let insertionResult = await TextInjector.inject(
+                    insertion,
+                    into: insertionTarget
+                )
                 let latency = ProcessInfo.processInfo.systemUptime - started
                 lastLatency = latency
-                let warning = recording.wasTruncated
+                let warning = insertionResult.errorMessage ?? (recording.wasTruncated
                     ? "The five-minute recording limit was reached."
-                    : nil
-                if recording.wasTruncated {
+                    : nil)
+                if let warning {
                     lastError = warning
                 }
                 activity = .idle
-                overlay.hide()
+                if insertionResult.errorMessage != nil {
+                    overlay.show(.error)
+                    overlay.hide(after: 0.9)
+                } else {
+                    overlay.hide()
+                }
                 // Persistence is deliberately enqueued only after the result
                 // has been injected and the latency-sensitive work is over.
                 history.enqueue(

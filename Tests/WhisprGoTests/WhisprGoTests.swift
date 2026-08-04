@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import CoreGraphics
 import XCTest
 @testable import WhisprGo
@@ -101,6 +102,51 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertTrue(preview.hasSuffix("…"))
         XCTAssertLessThanOrEqual(preview.count, HistoryText.previewCharacterLimit + 1)
         XCTAssertEqual(HistoryText.preview("Short transcript"), "Short transcript")
+    }
+
+    @MainActor
+    func testPasteboardSnapshotRestoresEveryItemAndRepresentation() throws {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let first = NSPasteboardItem()
+        first.setString("original", forType: .string)
+        first.setData(Data([0x01, 0x02, 0x03]), forType: .init("com.whisprgo.test-data"))
+        let second = NSPasteboardItem()
+        second.setString("second item", forType: .string)
+
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects([first, second]))
+        let snapshot = TextInjector.PasteboardSnapshot(pasteboard: pasteboard)
+
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("temporary transcript", forType: .string))
+        let ownedChangeCount = pasteboard.changeCount
+        XCTAssertTrue(snapshot.restore(on: pasteboard, ifChangeCountIs: ownedChangeCount))
+
+        let restoredItems = try XCTUnwrap(pasteboard.pasteboardItems)
+        XCTAssertEqual(restoredItems.count, 2)
+        XCTAssertEqual(restoredItems[0].string(forType: .string), "original")
+        XCTAssertEqual(
+            restoredItems[0].data(forType: .init("com.whisprgo.test-data")),
+            Data([0x01, 0x02, 0x03])
+        )
+        XCTAssertEqual(restoredItems[1].string(forType: .string), "second item")
+    }
+
+    @MainActor
+    func testPasteboardSnapshotDoesNotOverwriteAUserClipboardChange() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("original", forType: .string))
+        let snapshot = TextInjector.PasteboardSnapshot(pasteboard: pasteboard)
+
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("temporary transcript", forType: .string))
+        let staleChangeCount = pasteboard.changeCount
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("new user copy", forType: .string))
+
+        XCTAssertFalse(snapshot.restore(on: pasteboard, ifChangeCountIs: staleChangeCount))
+        XCTAssertEqual(pasteboard.string(forType: .string), "new user copy")
     }
 
     func testStartupLineWaveBuildsLeftToRightAndSettlesExactly() throws {
