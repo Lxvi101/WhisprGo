@@ -6,8 +6,8 @@ import Foundation
 @MainActor
 enum TextInjector {
     struct Target {
-        fileprivate let element: AXUIElement
-        fileprivate let processIdentifier: pid_t
+        let element: AXUIElement
+        let processIdentifier: pid_t
     }
 
     enum Result: Equatable {

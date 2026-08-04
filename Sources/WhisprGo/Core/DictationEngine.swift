@@ -45,6 +45,8 @@ final class DictationEngine: ObservableObject {
     @Published private(set) var modelCacheRevision = 0
     @Published private(set) var keepMicrophoneActive: Bool
     @Published private(set) var preferBuiltInMicrophone: Bool
+    @Published private(set) var dictationMode: DictationMode
+    @Published private(set) var proContextEnabled: Bool
 
     @Published var selectedModelID: String {
         didSet {
@@ -66,18 +68,26 @@ final class DictationEngine: ObservableObject {
     // hardware stream active is a new privacy choice and must be opted into.
     private static let keepMicrophoneActiveKey = "keepMicrophoneActive"
     private static let preferBuiltInMicrophoneKey = "preferBuiltInMicrophone"
+    private static let dictationModeKey = "dictationMode"
+    private static let proContextEnabledKey = "proContextEnabled"
     private static let defaultModelVersionKey = "defaultModelVersion"
     private static let currentDefaultModelVersion = 2
 
     private let runtime = TranscriptionRuntime()
+    private let proProcessor = ProTranscriptionProcessor()
     private let capture: AudioCapture
     private let hotkey = HotkeyMonitor()
     private let overlay: RecordingOverlay
+    private let modeBadge = ModeBadgeOverlay()
     private let history = DictationHistoryStore.shared
+    private let profileStore = ProProfileStore.shared
 
     private var hasStarted = false
     private var recordingMode: RecordingMode?
+    private var recordingSessionID: UUID?
     private var insertionTarget: TextInjector.Target?
+    private var recordingContext: AccessibilityContextSnapshot?
+    private var lastCompletedTranscript: String?
     private var modelPreparationTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
 
@@ -87,6 +97,11 @@ final class DictationEngine: ObservableObject {
         let prefersBuiltIn = defaults.object(forKey: Self.preferBuiltInMicrophoneKey) as? Bool
             ?? true
         preferBuiltInMicrophone = prefersBuiltIn
+        dictationMode = DictationMode(
+            rawValue: defaults.string(forKey: Self.dictationModeKey) ?? ""
+        ) ?? .fast
+        proContextEnabled = defaults.object(forKey: Self.proContextEnabledKey) as? Bool
+            ?? true
 
         let levelMeter = AudioLevelMeter()
         capture = AudioCapture(
@@ -114,12 +129,16 @@ final class DictationEngine: ObservableObject {
         ModelCatalog.model(id: selectedModelID)
     }
 
+    var needsOpenAIKey: Bool {
+        !openAIKeyConfigured && (!selectedModel.isLocal || dictationMode == .pro)
+    }
+
     var canToggle: Bool {
         switch activity {
         case .recording:
             return true
         case .idle:
-            return permissions.isComplete && modelState == .ready
+            return permissions.isComplete && modelState == .ready && !needsOpenAIKey
         case .transcribing:
             return false
         }
@@ -130,7 +149,7 @@ final class DictationEngine: ObservableObject {
     }
 
     var canRerunHistory: Bool {
-        activity == .idle && modelState == .ready
+        activity == .idle && modelState == .ready && !needsOpenAIKey
     }
 
     var stateTitle: String {
@@ -141,6 +160,7 @@ final class DictationEngine: ObservableObject {
         }
 
         if !permissions.isComplete { return "Finish setup" }
+        if needsOpenAIKey { return "API key needed" }
         switch modelState {
         case .starting: return "Starting"
         case .downloading: return "Downloading model"
@@ -165,6 +185,7 @@ final class DictationEngine: ObservableObject {
         }
         if !permissions.microphone { return "Allow microphone access" }
         if !permissions.accessibility { return "Allow Accessibility access" }
+        if needsOpenAIKey { return "Add your OpenAI key in Settings" }
         switch modelState {
         case .starting: return "Preparing WhisprGo"
         case let .downloading(progress):
@@ -204,6 +225,7 @@ final class DictationEngine: ObservableObject {
         if activity == .recording {
             _ = capture.stop(keepActive: false)
         }
+        recordingSessionID = nil
         capture.shutdown()
         hotkey.stop()
         history.stopPlayback()
@@ -285,6 +307,8 @@ final class DictationEngine: ObservableObject {
     func rerunHistoryEntry(_ id: UUID) {
         guard canRerunHistory else { return }
         let insertionTarget = TextInjector.captureTarget()
+        let dictationMode = self.dictationMode
+        let proProfile = profileStore.selectedProfile
         lastError = nil
         activity = .transcribing
         overlay.show(.transcribing)
@@ -301,11 +325,20 @@ final class DictationEngine: ObservableObject {
                 let samples = try await history.samples(for: id)
                 guard !Task.isCancelled else { return }
                 let started = ProcessInfo.processInfo.systemUptime
-                let transcript = try await runtime.transcribe(
+                let rawTranscript = try await runtime.transcribe(
                     samples: samples,
                     modelID: model.id
                 )
                 guard !Task.isCancelled else { return }
+
+                let processed = await processTranscript(
+                    rawTranscript,
+                    mode: dictationMode,
+                    context: nil,
+                    profile: proProfile
+                )
+                let transcript = processed.text
+                lastCompletedTranscript = transcript
 
                 var insertion = transcript
                 if appendTrailingSpace, !insertion.isEmpty {
@@ -318,8 +351,9 @@ final class DictationEngine: ObservableObject {
                 let latency = ProcessInfo.processInfo.systemUptime - started
                 lastLatency = latency
                 activity = .idle
-                if let insertionError = insertionResult.errorMessage {
-                    lastError = insertionError
+                let warning = insertionResult.errorMessage ?? processed.warning
+                if let warning {
+                    lastError = warning
                     overlay.show(.error)
                     overlay.hide(after: 0.9)
                 } else {
@@ -329,9 +363,13 @@ final class DictationEngine: ObservableObject {
                     id: id,
                     transcript: transcript,
                     modelID: model.id,
-                    modelName: model.name,
+                    modelName: historyModelName(
+                        model,
+                        mode: dictationMode,
+                        profile: proProfile
+                    ),
                     latency: latency,
-                    errorMessage: insertionResult.errorMessage
+                    errorMessage: warning
                 )
             } catch {
                 guard !Task.isCancelled else { return }
@@ -357,6 +395,45 @@ final class DictationEngine: ObservableObject {
         selectedModelID = id
         lastError = nil
         prepareSelectedModel()
+    }
+
+    func setDictationMode(_ mode: DictationMode) {
+        guard activity == .idle, dictationMode != mode else { return }
+        dictationMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.dictationModeKey)
+        lastError = nil
+    }
+
+    func setProContextEnabled(_ enabled: Bool) {
+        guard activity == .idle, proContextEnabled != enabled else { return }
+        proContextEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.proContextEnabledKey)
+        lastError = nil
+    }
+
+    func pasteLastDictation() {
+        guard activity == .idle else { return }
+        let target = TextInjector.captureTarget()
+        Task { [weak self] in
+            guard let self else { return }
+            let transcript: String?
+            if let lastCompletedTranscript {
+                transcript = lastCompletedTranscript
+            } else {
+                transcript = await history.latestTranscript()
+            }
+            guard let transcript, !transcript.isEmpty else {
+                modeBadge.show("No dictation yet")
+                return
+            }
+            let result = await TextInjector.inject(transcript, into: target)
+            if let error = result.errorMessage {
+                lastError = error
+                modeBadge.show("Could not paste")
+            } else {
+                modeBadge.show("Pasted last dictation")
+            }
+        }
     }
 
     func isModelDownloaded(_ id: String) -> Bool {
@@ -405,6 +482,7 @@ final class DictationEngine: ObservableObject {
         do {
             try KeychainStore.saveOpenAIAPIKey(key)
             openAIKeyConfigured = KeychainStore.openAIAPIKey() != nil
+            Task { await proProcessor.resetCredentials() }
             lastError = nil
             if !selectedModel.isLocal {
                 prepareSelectedModel()
@@ -548,12 +626,29 @@ final class DictationEngine: ObservableObject {
             let recording = capture.stop(keepActive: keepMicrophoneActive)
             capture.recycle(recording.samples)
             recordingMode = nil
+            recordingSessionID = nil
             insertionTarget = nil
+            recordingContext = nil
             activity = .idle
             overlay.hide(after: 0)
 
         case .toggle:
             toggleDictation()
+
+        case .toggleMode:
+            guard activity == .idle else { return }
+            let nextMode: DictationMode = dictationMode == .fast ? .pro : .fast
+            setDictationMode(nextMode)
+            let suffix = nextMode == .pro && !openAIKeyConfigured ? " · Key needed" : ""
+            modeBadge.show("\(nextMode.title) Mode\(suffix)")
+
+        case .cycleProfile:
+            guard activity == .idle, dictationMode == .pro else { return }
+            let profile = profileStore.selectNext()
+            modeBadge.show("Profile · \(profile.name)")
+
+        case .pasteLast:
+            pasteLastDictation()
         }
     }
 
@@ -561,10 +656,26 @@ final class DictationEngine: ObservableObject {
         let target = TextInjector.captureTarget()
         do {
             try capture.start()
+            let sessionID = UUID()
+            recordingSessionID = sessionID
             insertionTarget = target
             recordingMode = mode
             activity = .recording
             overlay.show(.recording)
+            recordingContext = nil
+
+            // Let the recording overlay commit its first frame before the
+            // bounded Accessibility read. Audio is already running, and Fast
+            // Mode never creates this task at all.
+            if dictationMode == .pro, proContextEnabled {
+                Task { @MainActor [weak self] in
+                    await Task.yield()
+                    guard let self, self.recordingSessionID == sessionID else { return }
+                    let context = AccessibilityContextReader.capture(from: target)
+                    guard self.recordingSessionID == sessionID else { return }
+                    self.recordingContext = context
+                }
+            }
         } catch {
             if !keepMicrophoneActive {
                 capture.shutdown()
@@ -578,9 +689,14 @@ final class DictationEngine: ObservableObject {
     private func stopAndTranscribe() {
         let recording = capture.stop(keepActive: keepMicrophoneActive)
         recordingMode = nil
+        recordingSessionID = nil
         let insertionTarget = self.insertionTarget
         self.insertionTarget = nil
+        let context = recordingContext
+        recordingContext = nil
         let model = selectedModel
+        let dictationMode = self.dictationMode
+        let proProfile = profileStore.selectedProfile
 
         if let integrityIssue = recording.integrityIssue {
             capture.recycle(recording.samples)
@@ -606,11 +722,19 @@ final class DictationEngine: ObservableObject {
             guard let self else { return }
             defer { capture.recycle(recording.samples) }
             do {
-                let transcript = try await runtime.transcribe(
+                let rawTranscript = try await runtime.transcribe(
                     samples: recording.samples,
                     modelID: model.id
                 )
                 guard !Task.isCancelled else { return }
+                let processed = await processTranscript(
+                    rawTranscript,
+                    mode: dictationMode,
+                    context: context,
+                    profile: proProfile
+                )
+                let transcript = processed.text
+                lastCompletedTranscript = transcript
                 var insertion = transcript
                 if appendTrailingSpace, !insertion.isEmpty {
                     insertion.append(" ")
@@ -621,14 +745,16 @@ final class DictationEngine: ObservableObject {
                 )
                 let latency = ProcessInfo.processInfo.systemUptime - started
                 lastLatency = latency
-                let warning = insertionResult.errorMessage ?? (recording.wasTruncated
+                let warning = insertionResult.errorMessage
+                    ?? processed.warning
+                    ?? (recording.wasTruncated
                     ? "The five-minute recording limit was reached."
                     : nil)
                 if let warning {
                     lastError = warning
                 }
                 activity = .idle
-                if insertionResult.errorMessage != nil {
+                if warning != nil {
                     overlay.show(.error)
                     overlay.hide(after: 0.9)
                 } else {
@@ -640,7 +766,11 @@ final class DictationEngine: ObservableObject {
                     samples: recording.samples,
                     transcript: transcript,
                     modelID: model.id,
-                    modelName: model.name,
+                    modelName: historyModelName(
+                        model,
+                        mode: dictationMode,
+                        profile: proProfile
+                    ),
                     duration: recording.duration,
                     latency: latency,
                     errorMessage: warning
@@ -663,5 +793,36 @@ final class DictationEngine: ObservableObject {
                 )
             }
         }
+    }
+
+    private func processTranscript(
+        _ rawTranscript: String,
+        mode: DictationMode,
+        context: AccessibilityContextSnapshot?,
+        profile: ProProfile
+    ) async -> (text: String, warning: String?) {
+        guard mode == .pro else { return (rawTranscript, nil) }
+
+        do {
+            let polished = try await proProcessor.polish(
+                rawTranscript,
+                context: context,
+                profilePrompt: profile.prompt
+            )
+            return (polished, nil)
+        } catch {
+            return (
+                rawTranscript,
+                "Pro cleanup was unavailable, so the Fast transcript was inserted. \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func historyModelName(
+        _ model: TranscriptionModel,
+        mode: DictationMode,
+        profile: ProProfile
+    ) -> String {
+        mode == .pro ? "\(model.name) · Pro · \(profile.name)" : model.name
     }
 }

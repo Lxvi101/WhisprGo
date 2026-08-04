@@ -4,6 +4,7 @@ import SwiftUI
 enum SettingsTab: Hashable {
     case general
     case models
+    case profiles
     case history
     case providers
 }
@@ -27,6 +28,10 @@ struct SettingsView: View {
             ModelSettingsPane(engine: engine)
                 .tabItem { Label("Models", systemImage: "circle.grid.3x3") }
                 .tag(SettingsTab.models)
+
+            ProfileSettingsPane()
+                .tabItem { Label("Profiles", systemImage: "text.badge.star") }
+                .tag(SettingsTab.profiles)
 
             HistorySettingsPane(engine: engine)
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
@@ -204,7 +209,9 @@ private struct HistoryRow: View {
                         .lineLimit(3)
                         .truncationMode(.tail)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 50, maxHeight: 50, alignment: .topLeading)
+                        .clipped()
+                        .layoutPriority(1)
 
                     HStack(spacing: 7) {
                         Text(entry.modelName)
@@ -220,32 +227,32 @@ private struct HistoryRow: View {
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .trailing, spacing: 7) {
-                    Button(action: onInspect) {
-                        Label("Inspect", systemImage: "doc.text.magnifyingglass")
-                    }
-
-                    Button(action: onRerun) {
-                        if isRerunning {
-                            HStack(spacing: 6) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Running")
-                            }
-                        } else {
-                            Label("Re-run & Type", systemImage: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(!canRerun || isRerunning)
-
-                    Button(role: .destructive, action: onRemove) {
-                        Label("Delete", systemImage: "trash")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
+                VStack(spacing: 6) {
+                    HistoryIconButton(
+                        systemImage: "doc.text.magnifyingglass",
+                        label: "Inspect full transcript",
+                        action: onInspect
+                    )
+                    HistoryIconButton(
+                        systemImage: "arrow.clockwise",
+                        label: "Re-run and type",
+                        isBusy: isRerunning,
+                        isDisabled: !canRerun || isRerunning,
+                        action: onRerun
+                    )
+                    HistoryIconButton(
+                        systemImage: "trash",
+                        label: "Delete recording",
+                        isDestructive: true,
+                        action: onRemove
+                    )
                 }
+                .frame(width: 28)
             }
             .padding(12)
         }
@@ -281,6 +288,38 @@ private struct HistoryRow: View {
             guard copyGeneration == generation else { return }
             isCopied = false
         }
+    }
+}
+
+private struct HistoryIconButton: View {
+    let systemImage: String
+    let label: String
+    var isBusy = false
+    var isDisabled = false
+    var isDestructive = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(0.045))
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isDestructive ? Color.red.opacity(0.82) : Color.primary)
+                }
+            }
+            .frame(width: 27, height: 27)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -423,9 +462,44 @@ private struct GeneralSettingsPane: View {
     var body: some View {
         SettingsPaneContainer(
             title: "General",
-            subtitle: "Shortcuts, audio routing, and background behavior"
+            subtitle: "Processing, shortcuts, audio routing, and background behavior"
         ) {
             Form {
+                Section {
+                    Picker(
+                        "Mode",
+                        selection: Binding(
+                            get: { engine.dictationMode },
+                            set: { engine.setDictationMode($0) }
+                        )
+                    ) {
+                        ForEach(DictationMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(engine.activity != .idle)
+
+                    Text(engine.dictationMode.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "Use nearby text as context in Pro Mode",
+                        isOn: Binding(
+                            get: { engine.proContextEnabled },
+                            set: { engine.setProContextEnabled($0) }
+                        )
+                    )
+                    .disabled(engine.activity != .idle)
+
+                    Text("Accessibility text is read once after recording starts. Fast Mode never reads or sends context. Screenshots are never captured.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    DottedSectionLabel("Processing")
+                }
+
                 Section {
                     LabeledContent("Push to talk") {
                         HStack(spacing: 7) {
@@ -440,6 +514,30 @@ private struct GeneralSettingsPane: View {
                             MinimalKeyCap("fn")
                             Text("+").foregroundStyle(.tertiary)
                             MinimalKeyCap("⇧")
+                        }
+                    }
+
+                    LabeledContent("Switch Fast / Pro") {
+                        HStack(spacing: 6) {
+                            MinimalKeyCap("R⇧")
+                            Text("Tap")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    LabeledContent("Next Pro profile") {
+                        HStack(spacing: 6) {
+                            MinimalKeyCap("R⌃")
+                            Text("+").foregroundStyle(.tertiary)
+                            MinimalKeyCap("R⇧")
+                        }
+                    }
+
+                    LabeledContent("Paste last dictation") {
+                        HStack(spacing: 5) {
+                            MinimalKeyCap("⌃")
+                            MinimalKeyCap("⌥")
+                            MinimalKeyCap("V")
                         }
                     }
 
@@ -528,6 +626,189 @@ private struct GeneralSettingsPane: View {
             }
             .formStyle(.grouped)
         }
+    }
+}
+
+private struct ProfileSettingsPane: View {
+    @ObservedObject private var store = ProProfileStore.shared
+    @State private var draftName = ""
+    @State private var draftPrompt = ""
+
+    var body: some View {
+        SettingsPaneContainer(
+            title: "Pro Profiles",
+            subtitle: "Custom cleanup rules for different kinds of writing"
+        ) {
+            HStack(spacing: 0) {
+                profileList
+                    .frame(width: 190)
+
+                Divider()
+
+                profileEditor
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear(perform:loadSelectedProfile)
+        .onChange(of: store.selectedProfileID) { _, _ in
+            loadSelectedProfile()
+        }
+    }
+
+    private var profileList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            DottedSectionLabel("Profiles")
+
+            ScrollView {
+                LazyVStack(spacing: 5) {
+                    ForEach(store.profiles) { profile in
+                        Button {
+                            select(profile.id)
+                        } label: {
+                            HStack(spacing: 9) {
+                                DotSelectionIndicator(
+                                    isSelected: profile.id == store.selectedProfileID
+                                )
+                                Text(profile.name)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 9)
+                            .frame(height: 34)
+                            .contentShape(Rectangle())
+                            .background(
+                                Color.primary.opacity(
+                                    profile.id == store.selectedProfileID ? 0.06 : 0
+                                ),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack {
+                Button {
+                    saveDraftIfPossible()
+                    _ = store.create()
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    store.remove(store.selectedProfileID)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .disabled(store.profiles.count <= 1)
+                .help("Delete profile")
+                .accessibilityLabel("Delete selected profile")
+            }
+        }
+        .padding(16)
+    }
+
+    private var profileEditor: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                DottedSectionLabel("Selected Profile")
+                Spacer()
+                MinimalBadge("Pro only")
+            }
+
+            TextField("Profile name", text: $draftName)
+                .textFieldStyle(.roundedBorder)
+
+            Text("Custom instructions")
+                .font(.callout.weight(.medium))
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $draftPrompt)
+                    .font(.system(size: 13))
+                    .scrollContentBackground(.hidden)
+                    .padding(7)
+
+                if draftPrompt.isEmpty {
+                    Text("Example: Keep emails concise and warm. Preserve greetings and sign-offs.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 15)
+                        .allowsHitTesting(false)
+                }
+            }
+            .background(
+                Color.primary.opacity(0.025),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+            }
+            .frame(minHeight: 190)
+
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Cycle while in Pro Mode")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        MinimalKeyCap("R⌃")
+                        Text("+").font(.caption2).foregroundStyle(.tertiary)
+                        MinimalKeyCap("R⇧")
+                    }
+                }
+
+                Spacer()
+
+                Text("\(draftPrompt.count) / 12,000")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+
+                Button("Save Profile", action: saveDraftIfPossible)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.primary)
+                    .disabled(!isDirty || cleanDraftName.isEmpty)
+            }
+        }
+        .padding(18)
+    }
+
+    private var cleanDraftName: String {
+        draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isDirty: Bool {
+        let profile = store.selectedProfile
+        return cleanDraftName != profile.name || draftPrompt != profile.prompt
+    }
+
+    private func select(_ id: UUID) {
+        guard id != store.selectedProfileID else { return }
+        saveDraftIfPossible()
+        store.select(id)
+    }
+
+    private func loadSelectedProfile() {
+        let profile = store.selectedProfile
+        draftName = profile.name
+        draftPrompt = profile.prompt
+    }
+
+    private func saveDraftIfPossible() {
+        guard !cleanDraftName.isEmpty else { return }
+        store.update(
+            id: store.selectedProfileID,
+            name: cleanDraftName,
+            prompt: draftPrompt
+        )
+        loadSelectedProfile()
     }
 }
 
@@ -701,7 +982,7 @@ private struct ProviderSettingsPane: View {
     var body: some View {
         SettingsPaneContainer(
             title: "Providers",
-            subtitle: "Optional cloud transcription, stored securely"
+            subtitle: "Cloud transcription and Pro Mode, stored securely"
         ) {
             Form {
                 Section {
@@ -751,7 +1032,7 @@ private struct ProviderSettingsPane: View {
                 }
 
                 Section {
-                    Text("The key is stored in macOS Keychain. It is never written to preferences, logs, or source files. Local models never send audio over the network.")
+                    Text("The key is stored in macOS Keychain. Fast Mode with a local model sends nothing to OpenAI. Pro Mode sends the raw transcript and, when enabled, bounded Accessibility text to GPT-5.6 Luna with API storage disabled. WhisprGo never captures screenshots.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } header: {

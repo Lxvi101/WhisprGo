@@ -54,12 +54,97 @@ struct HotkeyGestureState {
     }
 }
 
+struct ModeShortcutState {
+    enum Action: Equatable {
+        case toggleMode
+        case cycleProfile
+    }
+
+    private static let rightShiftKeyCode: CGKeyCode = 60
+    private static let leftShiftKeyCode: CGKeyCode = 56
+    private static let rightControlKeyCode: CGKeyCode = 62
+
+    private var rightShiftCandidate = false
+    private var profileChord = false
+    private var rightControlIsDown = false
+    private var leftShiftIsDown = false
+
+    mutating func consume(
+        type: CGEventType,
+        keyCode: CGKeyCode,
+        flags: CGEventFlags
+    ) -> Action? {
+        if type == .keyDown {
+            rightShiftCandidate = false
+            profileChord = false
+            return nil
+        }
+
+        guard type == .flagsChanged else { return nil }
+
+        if keyCode == Self.leftShiftKeyCode {
+            if flags.contains(.maskShift) {
+                leftShiftIsDown.toggle()
+            } else {
+                leftShiftIsDown = false
+            }
+            rightShiftCandidate = false
+            profileChord = false
+            return nil
+        }
+
+        if flags.contains(.maskSecondaryFn)
+            || flags.contains(.maskAlternate)
+            || flags.contains(.maskCommand) {
+            rightShiftCandidate = false
+            profileChord = false
+            return nil
+        }
+
+        if keyCode == Self.rightControlKeyCode {
+            if flags.contains(.maskControl) {
+                rightControlIsDown.toggle()
+            } else {
+                rightControlIsDown = false
+            }
+            if rightShiftCandidate, rightControlIsDown {
+                profileChord = true
+            }
+            return nil
+        }
+
+        guard keyCode == Self.rightShiftKeyCode else { return nil }
+        if flags.contains(.maskShift) {
+            guard !leftShiftIsDown,
+                  !flags.contains(.maskControl) || rightControlIsDown
+            else {
+                rightShiftCandidate = false
+                profileChord = false
+                return nil
+            }
+            rightShiftCandidate = true
+            profileChord = rightControlIsDown
+            return nil
+        }
+
+        guard rightShiftCandidate else { return nil }
+        defer {
+            rightShiftCandidate = false
+            profileChord = false
+        }
+        return profileChord ? .cycleProfile : .toggleMode
+    }
+}
+
 final class HotkeyMonitor {
     enum Event {
         case pushToTalkBegan
         case pushToTalkEnded
         case pushToTalkCancelled
         case toggle
+        case toggleMode
+        case cycleProfile
+        case pasteLast
     }
 
     enum HotkeyError: LocalizedError {
@@ -80,6 +165,7 @@ final class HotkeyMonitor {
     private var source: CFRunLoopSource?
     private var onEvent: ((Event) -> Void)?
     private var gestureState = HotkeyGestureState()
+    private var modeShortcutState = ModeShortcutState()
     private var pendingPushToTalk: DispatchWorkItem?
     private var pushToTalkIsActive = false
 
@@ -90,7 +176,10 @@ final class HotkeyMonitor {
         }
         self.onEvent = onEvent
 
-        let eventMask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
+        let eventMask = CGEventMask(
+            (1 << CGEventType.flagsChanged.rawValue)
+                | (1 << CGEventType.keyDown.rawValue)
+        )
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -126,15 +215,40 @@ final class HotkeyMonitor {
         pushToTalkIsActive = false
         onEvent = nil
         gestureState = HotkeyGestureState()
+        modeShortcutState = ModeShortcutState()
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            modeShortcutState = ModeShortcutState()
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
             return
         }
+        if let modeAction = modeShortcutState.consume(
+            type: type,
+            keyCode: CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)),
+            flags: event.flags
+        ) {
+            switch modeAction {
+            case .toggleMode:
+                onEvent?(.toggleMode)
+            case .cycleProfile:
+                onEvent?(.cycleProfile)
+            }
+        }
+
+        let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        if Self.isPasteLastShortcut(
+            type: type,
+            keyCode: keyCode,
+            flags: event.flags,
+            isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        ) {
+            onEvent?(.pasteLast)
+        }
+
         guard type == .flagsChanged else { return }
         let actions = gestureState.consume(
             flags: event.flags,
@@ -143,6 +257,22 @@ final class HotkeyMonitor {
         for action in actions {
             perform(action)
         }
+    }
+
+    static func isPasteLastShortcut(
+        type: CGEventType,
+        keyCode: CGKeyCode,
+        flags: CGEventFlags,
+        isRepeat: Bool = false
+    ) -> Bool {
+        type == .keyDown
+            && keyCode == 9
+            && !isRepeat
+            && flags.contains(.maskControl)
+            && flags.contains(.maskAlternate)
+            && !flags.contains(.maskCommand)
+            && !flags.contains(.maskShift)
+            && !flags.contains(.maskSecondaryFn)
     }
 
     private func perform(_ action: HotkeyGestureState.Action) {

@@ -15,9 +15,11 @@ struct MenuBarView: View {
                 .padding(.horizontal, 18)
 
             VStack(alignment: .leading, spacing: 12) {
+                modePanel
+
                 modelPanel
 
-                ShortcutGuide()
+                ShortcutGuide(engine: engine)
 
                 if case let .downloading(progress) = engine.modelState {
                     DownloadProgress(progress: progress)
@@ -25,7 +27,7 @@ struct MenuBarView: View {
 
                 if !engine.permissions.isComplete {
                     SetupNotice(engine: engine)
-                } else if engine.modelState == .needsAPIKey {
+                } else if engine.needsOpenAIKey {
                     APIKeyNotice(engine: engine)
                 }
 
@@ -53,6 +55,44 @@ struct MenuBarView: View {
         .frame(width: 360)
         .onAppear {
             engine.refreshPermissions()
+        }
+    }
+
+    private var modePanel: some View {
+        MinimalPanel {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    DottedSectionLabel("Processing")
+                    Spacer()
+                    MinimalBadge(engine.dictationMode == .fast ? "Local path" : "Luna")
+                }
+
+                Picker("Processing mode", selection: modeBinding) {
+                    ForEach(DictationMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .disabled(engine.activity != .idle)
+
+                Text(engine.dictationMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if engine.dictationMode == .pro {
+                    ProProfilePicker()
+                } else {
+                    HStack {
+                        Text("Tap Right Shift to switch")
+                        Spacer()
+                        MinimalKeyCap("R⇧")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -165,6 +205,13 @@ struct MenuBarView: View {
             set: { engine.selectModel($0) }
         )
     }
+
+    private var modeBinding: Binding<DictationMode> {
+        Binding(
+            get: { engine.dictationMode },
+            set: { engine.setDictationMode($0) }
+        )
+    }
 }
 
 private struct DottedActivityMark: View {
@@ -231,23 +278,74 @@ private struct DotMenuGlyph: View {
 }
 
 private struct ShortcutGuide: View {
+    @ObservedObject var engine: DictationEngine
+
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 6) {
-                MinimalKeyCap("fn")
-                Text("push to talk")
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    MinimalKeyCap("fn")
+                    Text("push to talk")
+                }
+                Spacer()
+                HStack(spacing: 5) {
+                    MinimalKeyCap("fn")
+                    Text("+").foregroundStyle(.tertiary)
+                    MinimalKeyCap("⇧")
+                    Text("toggle")
+                }
             }
-            Spacer()
-            HStack(spacing: 5) {
-                MinimalKeyCap("fn")
-                Text("+").foregroundStyle(.tertiary)
-                MinimalKeyCap("⇧")
-                Text("toggle")
+
+            HStack {
+                HStack(spacing: 5) {
+                    MinimalKeyCap("R⇧")
+                    Text("mode")
+                }
+                Spacer()
+                Button(action: engine.pasteLastDictation) {
+                    HStack(spacing: 5) {
+                        MinimalKeyCap("⌃")
+                        MinimalKeyCap("⌥")
+                        MinimalKeyCap("V")
+                        Text("paste last")
+                    }
+                }
+                .buttonStyle(.plain)
             }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct ProProfilePicker: View {
+    @ObservedObject private var store = ProProfileStore.shared
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Text("Profile")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Profile", selection: selection) {
+                ForEach(store.profiles) { profile in
+                    Text(profile.name).tag(profile.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            MinimalKeyCap("⌃")
+            Text("+").font(.caption2).foregroundStyle(.tertiary)
+            MinimalKeyCap("R⇧")
+        }
+    }
+
+    private var selection: Binding<UUID> {
+        Binding(
+            get: { store.selectedProfileID },
+            set: { store.select($0) }
+        )
     }
 }
 
@@ -307,7 +405,11 @@ private struct APIKeyNotice: View {
         MinimalPanel {
             HStack(spacing: 10) {
                 DotSelectionIndicator(isSelected: false)
-                Text("This model needs an OpenAI API key.")
+                Text(
+                    engine.dictationMode == .pro
+                        ? "Pro Mode needs an OpenAI API key."
+                        : "This model needs an OpenAI API key."
+                )
                     .font(.caption)
                 Spacer()
                 Button("Add Key") {

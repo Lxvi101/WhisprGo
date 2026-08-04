@@ -311,6 +311,20 @@ final class DictationHistoryStore: ObservableObject {
         try await persistence.samples(for: id)
     }
 
+    func latestTranscript() async -> String? {
+        if let transcript = entries.first(where: { !$0.transcript.isEmpty })?.transcript {
+            return transcript
+        }
+        do {
+            let snapshot = try await persistence.snapshot()
+            apply(snapshot)
+            return snapshot.entries.first(where: { !$0.transcript.isEmpty })?.transcript
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
     func setRerunning(_ id: UUID?) {
         rerunningEntryID = id
     }
