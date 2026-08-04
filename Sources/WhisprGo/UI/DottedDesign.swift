@@ -24,11 +24,13 @@ enum BrandAssets {
         return image
     }()
 
-    static let fullLogo: NSImage? = loadImage(
-        named: "WhisprGo",
-        extension: "svg",
-        developmentPath: "Assets/WhisprGo.svg"
-    )
+    static func loadFullLogo() -> NSImage? {
+        loadImage(
+            named: "WhisprGo",
+            extension: "svg",
+            developmentPath: "Assets/WhisprGo.svg"
+        )
+    }
 
     private static func loadImage(
         named name: String,

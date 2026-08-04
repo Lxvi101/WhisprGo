@@ -103,6 +103,25 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertEqual(HistoryText.preview("Short transcript"), "Short transcript")
     }
 
+    func testStartupLineWaveBuildsLeftToRightAndSettlesExactly() throws {
+        XCTAssertEqual(StartupMotionPreset.production, .lineWave)
+        XCTAssertEqual(StartupMotionPreset.allCases.count, 4)
+        XCTAssertEqual(StartupDotGeometry.dots.count, 55)
+
+        let left = try XCTUnwrap(StartupDotGeometry.dots.min { $0.centerX < $1.centerX })
+        let right = try XCTUnwrap(StartupDotGeometry.dots.max { $0.centerX < $1.centerX })
+        let leftSamples = StartupMotionPreset.lineWave.samples(for: left, index: 0)
+        let rightSamples = StartupMotionPreset.lineWave.samples(for: right, index: 0)
+        let final = try XCTUnwrap(leftSamples.last)
+
+        XCTAssertEqual(leftSamples.count, 86)
+        XCTAssertGreaterThan(leftSamples[24].opacity, rightSamples[24].opacity)
+        XCTAssertEqual(final.opacity, 1, accuracy: 0.000_001)
+        XCTAssertEqual(final.translateX, 0, accuracy: 0.000_001)
+        XCTAssertEqual(final.translateY, 0, accuracy: 0.000_001)
+        XCTAssertEqual(final.scale, 1, accuracy: 0.000_001)
+    }
+
     func testAudioLevelMeterKeepsNewestValue() {
         let meter = AudioLevelMeter()
         meter.store(0.125)
