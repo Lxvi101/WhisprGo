@@ -511,6 +511,19 @@ private struct GeneralSettingsPane: View {
                     Text("Accessibility text is read once after recording starts. Fast Mode never reads or sends context. Screenshots are never captured.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if engine.dictationMode == .pro {
+                        LabeledContent("Last context capture") {
+                            Text(
+                                engine.proContextEnabled
+                                    ? (engine.lastContextSummary ?? "Not captured yet")
+                                    : "Turned off"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                        }
+                    }
                 } header: {
                     DottedSectionLabel("Processing")
                 }

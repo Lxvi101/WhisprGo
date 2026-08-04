@@ -87,6 +87,21 @@ struct MenuBarView: View {
 
                 if engine.dictationMode == .pro {
                     ProProfilePicker()
+
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(Color.primary.opacity(0.45))
+                            .frame(width: 4, height: 4)
+                        Text(
+                            engine.proContextEnabled
+                                ? (engine.lastContextSummary ?? "Context will be read when recording starts")
+                                : "Context is turned off"
+                        )
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 } else {
                     HStack {
                         Text("Tap Right Shift to switch")

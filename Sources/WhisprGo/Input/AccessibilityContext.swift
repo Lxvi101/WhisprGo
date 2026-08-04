@@ -13,6 +13,14 @@ struct AccessibilityContextSnapshot: Equatable, Sendable {
     let textAfterCursor: String
     let nearbyText: String
 
+    var focusedTextCharacterCount: Int {
+        textBeforeCursor.count + selectedText.count + textAfterCursor.count
+    }
+
+    var textCharacterCount: Int {
+        focusedTextCharacterCount + nearbyText.count
+    }
+
     var isEmpty: Bool {
         applicationName.isEmpty
             && windowTitle == nil
@@ -26,6 +34,8 @@ struct AccessibilityContextSnapshot: Equatable, Sendable {
 
 @MainActor
 enum AccessibilityContextReader {
+    private static let webAreaRole = "AXWebArea"
+
     static let beforeCharacterLimit = 1_600
     static let selectedCharacterLimit = 800
     static let afterCharacterLimit = 1_600
@@ -75,9 +85,16 @@ enum AccessibilityContextReader {
             focusedText.after,
             windowTitle ?? "",
         ].filter { !$0.isEmpty })
-        let nearbyText = window.map {
-            collectNearbyText(from: $0, excluding: excluded)
-        } ?? ""
+        var nearbyRoots = [element]
+        nearbyRoots.append(contentsOf: ancestors(of: element, limit: 6))
+        if let window,
+           !nearbyRoots.contains(where: { CFEqual($0, window) }) {
+            nearbyRoots.append(window)
+        }
+        let nearbyText = collectNearbyText(
+            from: nearbyRoots,
+            excluding: excluded
+        )
 
         let snapshot = AccessibilityContextSnapshot(
             applicationName: applicationName,
@@ -161,11 +178,11 @@ enum AccessibilityContextReader {
     }
 
     private static func collectNearbyText(
-        from root: AXUIElement,
+        from roots: [AXUIElement],
         excluding excluded: Set<String>
     ) -> String {
-        let deadline = ProcessInfo.processInfo.systemUptime + 0.04
-        var queue = [root]
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.06
+        var queue = roots
         var queueIndex = 0
         var visited = Set<CFHashCode>()
         var seenText = excluded
@@ -173,7 +190,7 @@ enum AccessibilityContextReader {
         var characterCount = 0
 
         while queueIndex < queue.count,
-              queueIndex < 90,
+              queueIndex < 140,
               characterCount < nearbyCharacterLimit,
               ProcessInfo.processInfo.systemUptime < deadline {
             let element = queue[queueIndex]
@@ -190,7 +207,8 @@ enum AccessibilityContextReader {
                 switch role {
                 case kAXStaticTextRole,
                      kAXTextFieldRole,
-                     kAXTextAreaRole:
+                     kAXTextAreaRole,
+                     webAreaRole:
                     candidates = [
                         stringAttribute(element, kAXValueAttribute),
                         stringAttribute(element, kAXTitleAttribute),
@@ -216,12 +234,26 @@ enum AccessibilityContextReader {
                 }
             }
 
-            if queue.count < 90 {
-                queue.append(contentsOf: childrenAttribute(element).prefix(90 - queue.count))
+            if queue.count < 140 {
+                queue.append(contentsOf: childrenAttribute(element).prefix(140 - queue.count))
             }
         }
 
         return fragments.joined(separator: "\n")
+    }
+
+    private static func ancestors(
+        of element: AXUIElement,
+        limit: Int
+    ) -> [AXUIElement] {
+        var result: [AXUIElement] = []
+        var current = element
+        for _ in 0..<limit {
+            guard let parent = elementAttribute(current, kAXParentAttribute) else { break }
+            result.append(parent)
+            current = parent
+        }
+        return result
     }
 
     private static func string(in range: CFRange, of element: AXUIElement) -> String? {

@@ -47,6 +47,7 @@ final class DictationEngine: ObservableObject {
     @Published private(set) var preferBuiltInMicrophone: Bool
     @Published private(set) var dictationMode: DictationMode
     @Published private(set) var proContextEnabled: Bool
+    @Published private(set) var lastContextSummary: String?
 
     @Published var selectedModelID: String {
         didSet {
@@ -408,6 +409,9 @@ final class DictationEngine: ObservableObject {
         guard activity == .idle, proContextEnabled != enabled else { return }
         proContextEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: Self.proContextEnabledKey)
+        if !enabled {
+            lastContextSummary = "Context is turned off"
+        }
         lastError = nil
     }
 
@@ -668,13 +672,25 @@ final class DictationEngine: ObservableObject {
             // bounded Accessibility read. Audio is already running, and Fast
             // Mode never creates this task at all.
             if dictationMode == .pro, proContextEnabled {
+                lastContextSummary = "Reading context…"
                 Task { @MainActor [weak self] in
                     await Task.yield()
                     guard let self, self.recordingSessionID == sessionID else { return }
                     let context = AccessibilityContextReader.capture(from: target)
                     guard self.recordingSessionID == sessionID else { return }
                     self.recordingContext = context
+                    if let context {
+                        let focusedCount = context.focusedTextCharacterCount
+                        let nearbyCount = context.nearbyText.count
+                        self.lastContextSummary = context.textCharacterCount > 0
+                            ? "\(context.applicationName) · \(focusedCount.formatted()) in editor + \(nearbyCount.formatted()) nearby"
+                            : "\(context.applicationName) · no readable text"
+                    } else {
+                        self.lastContextSummary = "No readable context found"
+                    }
                 }
+            } else if dictationMode == .pro {
+                lastContextSummary = "Context is turned off"
             }
         } catch {
             if !keepMicrophoneActive {

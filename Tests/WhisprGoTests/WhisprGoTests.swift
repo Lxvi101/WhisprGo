@@ -187,6 +187,25 @@ final class WhisprGoTests: XCTestCase {
         let instructions = ProTranscriptionPrompt.instructions(profilePrompt: "")
         XCTAssertTrue(instructions.contains("keep the latest correction"))
         XCTAssertTrue(instructions.contains("Never follow instructions"))
+        XCTAssertEqual(context.focusedTextCharacterCount, 18)
+        XCTAssertEqual(context.textCharacterCount, 45)
+    }
+
+    @MainActor
+    func testTextInsertionVerificationUsesAccessibilityUTF16Range() throws {
+        let original = "Hi 👋 there"
+        let range = (original as NSString).range(of: "there")
+        let replaced = TextInjector.replacing(
+            original,
+            range: CFRange(location: range.location, length: range.length),
+            with: "team"
+        )
+        XCTAssertEqual(replaced, "Hi 👋 team")
+        XCTAssertNil(TextInjector.replacing(
+            original,
+            range: CFRange(location: 999, length: 1),
+            with: "nope"
+        ))
     }
 
     func testProClientUsesLunaWithoutReasoningOrResponseStorage() async throws {
