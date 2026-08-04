@@ -13,6 +13,9 @@ HotkeyMonitor ──► AudioCapture ──► TranscriptionRuntime ──► Te
                        ▼
                RecordingOverlay
                (display-synced Core Animation)
+
+After text insertion only:
+captured buffer ──► HistoryPersistence actor ──► WAV + compact JSON manifest
 ```
 
 ## Lifecycle
@@ -25,7 +28,8 @@ HotkeyMonitor ──► AudioCapture ──► TranscriptionRuntime ──► Te
 6. Source and resampled durations are compared; incomplete capture never reaches a speech model.
 7. Local audio goes to FluidAudio/Parakeet or WhisperKit. Cloud audio is encoded as 16-bit WAV and posted to the selected API model.
 8. Text is inserted directly into the focused Accessibility element when supported, with Unicode CGEvents as the compatibility fallback.
-9. No audio or transcript is persisted. In always-active mode, an atomic gate discards idle callbacks before any conversion or buffering.
+9. After insertion completes, a utility-priority actor encodes the same immutable buffer to WAV and atomically updates a compact manifest. The newest 50 runs are retained.
+10. In always-active mode, an atomic gate discards idle callbacks before any conversion, buffering, or history persistence.
 
 ## Memory limits
 
@@ -37,7 +41,8 @@ HotkeyMonitor ──► AudioCapture ──► TranscriptionRuntime ──► Te
 - Parakeet uses the int8 Core ML encoder and one long-form worker to prevent multi-worker memory spikes.
 - Cloud selection releases the local Core ML pipeline entirely.
 - Every new model download has an isolated storage root, so removal reclaims that model without touching any other cache.
-- There is no transcript history, database, WebView, analytics SDK, or background sidecar.
+- History is bounded to 50 16 kHz mono WAV files. It uses a compact JSON manifest rather than a resident database, and no audio is decoded until the user explicitly replays or re-runs it.
+- There is no WebView, analytics SDK, or background sidecar.
 
 ## Latency tradeoffs
 
@@ -51,4 +56,6 @@ Parakeet v3 uses one long-form worker to cap memory. Its multilingual long-form 
 
 Local model prewarming reduces first-dictation latency and peak Core ML specialization memory, at the cost of a longer one-time model preparation step. Cloud latency is network dependent; the client reuses a URLSession to preserve connection pooling between dictations.
 
-The overlay does not observe an audio-level model. The real-time callback overwrites one C11 atomic Float, and a 60 fps maximum display link reads only the newest value. Eleven prebuilt layers are transformed inside disabled Core Animation transactions; no update can accumulate in a queue.
+The overlay does not observe an audio-level model. The real-time callback overwrites one C11 atomic Float, and a 60 fps maximum display link reads only the newest value. Prebuilt dot layers update inside disabled Core Animation transactions; no update can accumulate in a queue.
+
+History never runs alongside transcription by design. The engine injects the result and records latency first, then hands the immutable buffer to a serial utility actor. WAV conversion, disk writes, manifest pruning, playback, and saved-audio decoding therefore add no work to model inference or text insertion.

@@ -15,7 +15,7 @@ WhisprGo is a low-latency macOS dictation engine that lives in the menu bar. Hol
 - AirPods mode uses the built-in Mac microphone while leaving headphones in high-quality playback mode.
 - Optional always-active input for the lowest possible shortcut-to-audio latency.
 - Optional launch at login.
-- No audio or transcript history.
+- A local history of the latest 50 dictations with audio replay, deletion, and re-run using the current model.
 
 The default is NVIDIA Parakeet TDT 0.6B v3, running locally through Core ML. It automatically detects and transcribes 25 European languages. Select Whisper Tiny for the smallest resident footprint, or an API model to avoid holding a local model in RAM.
 
@@ -75,12 +75,13 @@ WhisprGo removes avoidable wake-up latency rather than promising impossible zero
 - Local inference uses Core ML and Apple Neural Engine defaults.
 - Cloud dictation reuses a single ephemeral URLSession connection pool.
 - Text insertion tries the focused Accessibility element before falling back to Unicode key events.
+- History persistence starts only after transcription and text insertion finish; WAV encoding and atomic metadata writes run on a utility-priority actor.
 
 See [Architecture](docs/ARCHITECTURE.md) for the full lifecycle and tradeoffs.
 
 ## Privacy
 
-Local model audio never leaves the Mac. OpenAI model audio is uploaded only after a dictation ends—when fn is released or the toggle is stopped. API keys are stored in Keychain. WhisprGo does not save audio or transcripts. If always-active input is enabled, idle samples are discarded immediately and never enter a recording buffer.
+Local model audio never leaves the Mac. OpenAI model audio is uploaded only after a dictation ends—when fn is released or the toggle is stopped. API keys are stored in Keychain. WhisprGo keeps the latest 50 completed dictations as local WAV files and metadata under its Application Support folder; each item or the entire history can be deleted from Settings. If always-active input is enabled, idle samples are discarded immediately and never enter a recording buffer or history.
 
 ## Acknowledgements
 

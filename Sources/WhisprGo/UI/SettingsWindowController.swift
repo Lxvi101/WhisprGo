@@ -7,7 +7,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private var windowController: NSWindowController?
 
-    func show(engine: DictationEngine) {
+    func show(engine: DictationEngine, tab: SettingsTab = .general) {
+        SettingsNavigation.shared.selection = tab
         let controller: NSWindowController
         if let existing = windowController {
             controller = existing

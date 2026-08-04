@@ -73,6 +73,7 @@ final class DictationEngine: ObservableObject {
     private let capture: AudioCapture
     private let hotkey = HotkeyMonitor()
     private let overlay: RecordingOverlay
+    private let history = DictationHistoryStore.shared
 
     private var hasStarted = false
     private var recordingMode: RecordingMode?
@@ -125,6 +126,10 @@ final class DictationEngine: ObservableObject {
 
     var canChangeModel: Bool {
         activity == .idle
+    }
+
+    var canRerunHistory: Bool {
+        activity == .idle && modelState == .ready
     }
 
     var stateTitle: String {
@@ -200,6 +205,7 @@ final class DictationEngine: ObservableObject {
         }
         capture.shutdown()
         hotkey.stop()
+        history.stopPlayback()
         Task { await runtime.release() }
     }
 
@@ -272,6 +278,66 @@ final class DictationEngine: ObservableObject {
             startRecording(mode: .toggle)
         case .transcribing:
             break
+        }
+    }
+
+    func rerunHistoryEntry(_ id: UUID) {
+        guard canRerunHistory else { return }
+        lastError = nil
+        activity = .transcribing
+        overlay.show(.transcribing)
+        history.setRerunning(id)
+        let model = selectedModel
+
+        transcriptionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { history.setRerunning(nil) }
+
+            do {
+                // File mapping and PCM decoding happen before the inference
+                // timer and away from the main actor in the history actor.
+                let samples = try await history.samples(for: id)
+                guard !Task.isCancelled else { return }
+                let started = ProcessInfo.processInfo.systemUptime
+                let transcript = try await runtime.transcribe(
+                    samples: samples,
+                    modelID: model.id
+                )
+                guard !Task.isCancelled else { return }
+
+                var insertion = transcript
+                if appendTrailingSpace, !insertion.isEmpty {
+                    insertion.append(" ")
+                }
+                TextInjector.inject(insertion)
+                let latency = ProcessInfo.processInfo.systemUptime - started
+                lastLatency = latency
+                activity = .idle
+                overlay.hide()
+                history.updateAfterRerun(
+                    id: id,
+                    transcript: transcript,
+                    modelID: model.id,
+                    modelName: model.name,
+                    latency: latency,
+                    errorMessage: nil
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                let message = error.localizedDescription
+                lastError = message
+                activity = .idle
+                overlay.show(.error)
+                overlay.hide(after: 0.9)
+                history.updateAfterRerun(
+                    id: id,
+                    transcript: nil,
+                    modelID: nil,
+                    modelName: nil,
+                    latency: nil,
+                    errorMessage: message
+                )
+            }
         }
     }
 
@@ -498,7 +564,7 @@ final class DictationEngine: ObservableObject {
     private func stopAndTranscribe() {
         let recording = capture.stop(keepActive: keepMicrophoneActive)
         recordingMode = nil
-        let modelID = selectedModelID
+        let model = selectedModel
 
         if let integrityIssue = recording.integrityIssue {
             capture.recycle(recording.samples)
@@ -524,27 +590,53 @@ final class DictationEngine: ObservableObject {
             guard let self else { return }
             defer { capture.recycle(recording.samples) }
             do {
-                var text = try await runtime.transcribe(
+                let transcript = try await runtime.transcribe(
                     samples: recording.samples,
-                    modelID: modelID
+                    modelID: model.id
                 )
                 guard !Task.isCancelled else { return }
-                if appendTrailingSpace, !text.isEmpty {
-                    text.append(" ")
+                var insertion = transcript
+                if appendTrailingSpace, !insertion.isEmpty {
+                    insertion.append(" ")
                 }
-                TextInjector.inject(text)
-                lastLatency = ProcessInfo.processInfo.systemUptime - started
+                TextInjector.inject(insertion)
+                let latency = ProcessInfo.processInfo.systemUptime - started
+                lastLatency = latency
+                let warning = recording.wasTruncated
+                    ? "The five-minute recording limit was reached."
+                    : nil
                 if recording.wasTruncated {
-                    lastError = "The five-minute recording limit was reached."
+                    lastError = warning
                 }
                 activity = .idle
                 overlay.hide()
+                // Persistence is deliberately enqueued only after the result
+                // has been injected and the latency-sensitive work is over.
+                history.enqueue(
+                    samples: recording.samples,
+                    transcript: transcript,
+                    modelID: model.id,
+                    modelName: model.name,
+                    duration: recording.duration,
+                    latency: latency,
+                    errorMessage: warning
+                )
             } catch {
                 guard !Task.isCancelled else { return }
-                lastError = error.localizedDescription
+                let message = error.localizedDescription
+                lastError = message
                 activity = .idle
                 overlay.show(.error)
                 overlay.hide(after: 0.9)
+                history.enqueue(
+                    samples: recording.samples,
+                    transcript: "",
+                    modelID: model.id,
+                    modelName: model.name,
+                    duration: recording.duration,
+                    latency: nil,
+                    errorMessage: message
+                )
             }
         }
     }

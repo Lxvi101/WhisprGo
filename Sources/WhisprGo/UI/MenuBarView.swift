@@ -132,18 +132,23 @@ struct MenuBarView: View {
     }
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 16) {
             Button {
-                SettingsWindowController.shared.show(engine: engine)
+                SettingsWindowController.shared.show(engine: engine, tab: .history)
             } label: {
                 HStack(spacing: 7) {
                     DotMenuGlyph()
-                    Text("Settings")
+                    Text("History")
                 }
             }
             .buttonStyle(.plain)
 
             Spacer()
+
+            Button("Settings") {
+                SettingsWindowController.shared.show(engine: engine)
+            }
+            .buttonStyle(.plain)
 
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
@@ -306,7 +311,7 @@ private struct APIKeyNotice: View {
                     .font(.caption)
                 Spacer()
                 Button("Add Key") {
-                    SettingsWindowController.shared.show(engine: engine)
+                    SettingsWindowController.shared.show(engine: engine, tab: .providers)
                 }
             }
         }

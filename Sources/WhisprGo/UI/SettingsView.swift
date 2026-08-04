@@ -1,18 +1,39 @@
 import SwiftUI
 
+enum SettingsTab: Hashable {
+    case general
+    case models
+    case history
+    case providers
+}
+
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+    @Published var selection: SettingsTab = .general
+}
+
 struct SettingsView: View {
     @ObservedObject var engine: DictationEngine
+    @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
-        TabView {
+        TabView(selection: $navigation.selection) {
             GeneralSettingsPane(engine: engine)
                 .tabItem { Label("General", systemImage: "slider.horizontal.3") }
+                .tag(SettingsTab.general)
 
             ModelSettingsPane(engine: engine)
                 .tabItem { Label("Models", systemImage: "circle.grid.3x3") }
+                .tag(SettingsTab.models)
+
+            HistorySettingsPane(engine: engine)
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(SettingsTab.history)
 
             ProviderSettingsPane(engine: engine)
                 .tabItem { Label("Providers", systemImage: "key") }
+                .tag(SettingsTab.providers)
         }
         .tint(.primary)
         .scenePadding()
@@ -20,6 +41,212 @@ struct SettingsView: View {
         .onAppear {
             engine.refreshPermissions()
         }
+    }
+}
+
+private struct HistorySettingsPane: View {
+    @ObservedObject var engine: DictationEngine
+    @ObservedObject private var history = DictationHistoryStore.shared
+    @State private var isConfirmingClear = false
+
+    var body: some View {
+        SettingsPaneContainer(
+            title: "History",
+            subtitle: "Replay or re-run recent dictations"
+        ) {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Saved only on this Mac")
+                            .font(.callout.weight(.medium))
+                        Text("The latest 50 recordings are kept. Re-run uses your currently selected model and types the new result.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    MinimalBadge("\(history.entries.count) / 50")
+                    Button("Clear All", role: .destructive) {
+                        isConfirmingClear = true
+                    }
+                    .disabled(history.entries.isEmpty)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 13)
+
+                if let error = history.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 9)
+                }
+
+                if history.entries.isEmpty {
+                    HistoryEmptyState()
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 9) {
+                            ForEach(history.entries) { entry in
+                                HistoryRow(
+                                    entry: entry,
+                                    isPlaying: history.playingEntryID == entry.id,
+                                    isRerunning: history.rerunningEntryID == entry.id,
+                                    canRerun: engine.canRerunHistory,
+                                    onPlay: { history.togglePlayback(entry.id) },
+                                    onRerun: { engine.rerunHistoryEntry(entry.id) },
+                                    onRemove: { history.remove(entry.id) }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 18)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            history.loadIfNeeded()
+        }
+        .alert("Clear dictation history?", isPresented: $isConfirmingClear) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete All Recordings", role: .destructive) {
+                history.clear()
+            }
+        } message: {
+            Text("This permanently removes every saved audio file and transcript from this Mac.")
+        }
+    }
+}
+
+private struct HistoryEmptyState: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            BrandWaveform()
+                .frame(width: 120, height: 66)
+                .opacity(0.52)
+            Text("No dictations yet")
+                .font(.headline)
+            Text("Finished recordings will appear here after transcription.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+}
+
+private struct HistoryRow: View {
+    let entry: DictationHistoryEntry
+    let isPlaying: Bool
+    let isRerunning: Bool
+    let canRerun: Bool
+    let onPlay: () -> Void
+    let onRerun: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onPlay) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.primary.opacity(0.22), lineWidth: 1)
+                        .frame(width: 34, height: 34)
+                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPlaying ? "Stop recording" : "Play recording")
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 7) {
+                    Text(HistoryLabels.date(entry.createdAt))
+                        .font(.caption.weight(.medium))
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                    Text(HistoryLabels.duration(entry.duration))
+                        .font(.caption.monospacedDigit())
+                    MinimalBadge("Audio")
+                }
+
+                Text(primaryText)
+                    .font(.callout)
+                    .foregroundStyle(entry.transcript.isEmpty ? .secondary : .primary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 7) {
+                    Text(entry.modelName)
+                    if let latency = entry.latency {
+                        Text("·")
+                        Text("\(latency.formatted(.number.precision(.fractionLength(2))))s")
+                            .monospacedDigit()
+                    }
+                    if entry.errorMessage != nil {
+                        Text("·")
+                        Text("Needs attention")
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .trailing, spacing: 7) {
+                Button(action: onRerun) {
+                    if isRerunning {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Running")
+                        }
+                    } else {
+                        Label("Re-run & Type", systemImage: "arrow.clockwise")
+                    }
+                }
+                .disabled(!canRerun || isRerunning)
+
+                Button(role: .destructive, action: onRemove) {
+                    Label("Delete", systemImage: "trash")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(12)
+        .background(
+            Color.primary.opacity(0.018),
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+        }
+    }
+
+    private var primaryText: String {
+        if !entry.transcript.isEmpty { return entry.transcript }
+        return entry.errorMessage ?? "No transcript was produced."
+    }
+}
+
+@MainActor
+private enum HistoryLabels {
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
+
+    static func date(_ value: Date) -> String {
+        dateFormatter.string(from: value)
+    }
+
+    static func duration(_ value: TimeInterval) -> String {
+        let seconds = max(0, Int(value.rounded()))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 

@@ -24,6 +24,77 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertEqual(String(data: data[36..<40], encoding: .utf8), "data")
     }
 
+    func testWAVRoundTripForSavedHistoryAudio() throws {
+        let original: [Float] = [-1, -0.5, 0, 0.25, 0.75, 1]
+        let decoded = try WAVDecoder.decode(WAVEncoder.encode(samples: original))
+        XCTAssertEqual(decoded.count, original.count)
+        for (actual, expected) in zip(decoded, original) {
+            XCTAssertEqual(actual, expected, accuracy: 1.0 / 32_767.0)
+        }
+    }
+
+    func testHistoryPersistsAudioAndMetadata() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WhisprGoHistoryTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let persistence = DictationHistoryPersistence(rootURL: root)
+        let samples = [Float](repeating: 0.2, count: 320)
+        let created = try await persistence.add(
+            samples: samples,
+            transcript: "A saved dictation",
+            modelID: "local.parakeet.v3",
+            modelName: "Parakeet",
+            duration: 0.02,
+            latency: 0.12,
+            errorMessage: nil
+        )
+
+        XCTAssertEqual(created.entries.count, 1)
+        XCTAssertEqual(created.entries[0].transcript, "A saved dictation")
+        let restoredSamples = try await persistence.samples(for: created.entries[0].id)
+        XCTAssertEqual(restoredSamples.count, samples.count)
+        XCTAssertEqual(restoredSamples[0], 0.2, accuracy: 1.0 / 32_767.0)
+
+        let reloaded = DictationHistoryPersistence(rootURL: root)
+        let reloadedSnapshot = try await reloaded.snapshot()
+        XCTAssertEqual(reloadedSnapshot.entries, created.entries)
+
+        let cleared = try await reloaded.removeAll()
+        XCTAssertTrue(cleared.entries.isEmpty)
+    }
+
+    func testHistoryRetentionStaysBounded() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WhisprGoHistoryLimitTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let persistence = DictationHistoryPersistence(rootURL: root)
+        var snapshot: DictationHistorySnapshot?
+        for index in 0...DictationHistoryPersistence.maximumEntryCount {
+            snapshot = try await persistence.add(
+                samples: [Float(index) / 100],
+                transcript: "Run \(index)",
+                modelID: "local.parakeet.v3",
+                modelName: "Parakeet",
+                duration: 1.0 / AudioCapture.sampleRate,
+                latency: nil,
+                errorMessage: nil
+            )
+        }
+
+        XCTAssertEqual(
+            snapshot?.entries.count,
+            DictationHistoryPersistence.maximumEntryCount
+        )
+        let audioFiles = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+            .filter { $0.pathExtension == "wav" }
+        XCTAssertEqual(audioFiles.count, DictationHistoryPersistence.maximumEntryCount)
+    }
+
     func testAudioLevelMeterKeepsNewestValue() {
         let meter = AudioLevelMeter()
         meter.store(0.125)
