@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum SettingsTab: Hashable {
@@ -48,6 +49,7 @@ private struct HistorySettingsPane: View {
     @ObservedObject var engine: DictationEngine
     @ObservedObject private var history = DictationHistoryStore.shared
     @State private var isConfirmingClear = false
+    @State private var inspectedEntry: DictationHistoryEntry?
 
     var body: some View {
         SettingsPaneContainer(
@@ -95,6 +97,7 @@ private struct HistorySettingsPane: View {
                                     canRerun: engine.canRerunHistory,
                                     onPlay: { history.togglePlayback(entry.id) },
                                     onRerun: { engine.rerunHistoryEntry(entry.id) },
+                                    onInspect: { inspectedEntry = entry },
                                     onRemove: { history.remove(entry.id) }
                                 )
                             }
@@ -115,6 +118,9 @@ private struct HistorySettingsPane: View {
             }
         } message: {
             Text("This permanently removes every saved audio file and transcript from this Mac.")
+        }
+        .sheet(item: $inspectedEntry) { entry in
+            TranscriptDetailView(entry: entry)
         }
     }
 }
@@ -143,90 +149,251 @@ private struct HistoryRow: View {
     let canRerun: Bool
     let onPlay: () -> Void
     let onRerun: () -> Void
+    let onInspect: () -> Void
     let onRemove: () -> Void
+    @State private var isCopied = false
+    @State private var copyGeneration = 0
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Button(action: onPlay) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.primary.opacity(0.22), lineWidth: 1)
-                        .frame(width: 34, height: 34)
-                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                }
+        ZStack {
+            Button(action: copyTranscript) {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(
+                        isCopied
+                            ? Color.green.opacity(0.13)
+                            : Color.primary.opacity(0.018)
+                    )
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isPlaying ? "Stop recording" : "Play recording")
+            .accessibilityLabel("Copy full transcript")
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 7) {
-                    Text(HistoryLabels.date(entry.createdAt))
-                        .font(.caption.weight(.medium))
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    Text(HistoryLabels.duration(entry.duration))
-                        .font(.caption.monospacedDigit())
-                    MinimalBadge("Audio")
-                }
-
-                Text(primaryText)
-                    .font(.callout)
-                    .foregroundStyle(entry.transcript.isEmpty ? .secondary : .primary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                HStack(spacing: 7) {
-                    Text(entry.modelName)
-                    if let latency = entry.latency {
-                        Text("·")
-                        Text("\(latency.formatted(.number.precision(.fractionLength(2))))s")
-                            .monospacedDigit()
-                    }
-                    if entry.errorMessage != nil {
-                        Text("·")
-                        Text("Needs attention")
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: onPlay) {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.primary.opacity(0.22), lineWidth: 1)
+                            .frame(width: 34, height: 34)
+                        Image(systemName: isPlaying ? "stop.fill" : "play.fill")
+                            .font(.system(size: 11, weight: .semibold))
                     }
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPlaying ? "Stop recording" : "Play recording")
 
-            VStack(alignment: .trailing, spacing: 7) {
-                Button(action: onRerun) {
-                    if isRerunning {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Running")
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 7) {
+                        Text(HistoryLabels.date(entry.createdAt))
+                            .font(.caption.weight(.medium))
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text(HistoryLabels.duration(entry.duration))
+                            .font(.caption.monospacedDigit())
+                        MinimalBadge("Audio")
+                        if isCopied {
+                            Label("Copied", systemImage: "checkmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.green)
+                                .transition(.opacity)
                         }
-                    } else {
-                        Label("Re-run & Type", systemImage: "arrow.clockwise")
                     }
-                }
-                .disabled(!canRerun || isRerunning)
 
-                Button(role: .destructive, action: onRemove) {
-                    Label("Delete", systemImage: "trash")
-                        .font(.caption)
+                    Text(previewText)
+                        .font(.callout)
+                        .foregroundStyle(entry.transcript.isEmpty ? .secondary : .primary)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 7) {
+                        Text(entry.modelName)
+                        if let latency = entry.latency {
+                            Text("·")
+                            Text("\(latency.formatted(.number.precision(.fractionLength(2))))s")
+                                .monospacedDigit()
+                        }
+                        if entry.errorMessage != nil {
+                            Text("·")
+                            Text("Needs attention")
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
+
+                VStack(alignment: .trailing, spacing: 7) {
+                    Button(action: onInspect) {
+                        Label("Inspect", systemImage: "doc.text.magnifyingglass")
+                    }
+
+                    Button(action: onRerun) {
+                        if isRerunning {
+                            HStack(spacing: 6) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Running")
+                            }
+                        } else {
+                            Label("Re-run & Type", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(!canRerun || isRerunning)
+
+                    Button(role: .destructive, action: onRemove) {
+                        Label("Delete", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
+            .padding(12)
         }
-        .padding(12)
-        .background(
-            Color.primary.opacity(0.018),
-            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-        )
         .overlay {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                .stroke(
+                    isCopied ? Color.green.opacity(0.55) : Color.primary.opacity(0.12),
+                    lineWidth: 1
+                )
         }
+        .animation(.easeOut(duration: 0.16), value: isCopied)
     }
 
-    private var primaryText: String {
+    private var fullText: String {
         if !entry.transcript.isEmpty { return entry.transcript }
         return entry.errorMessage ?? "No transcript was produced."
+    }
+
+    private var previewText: String {
+        HistoryText.preview(fullText)
+    }
+
+    private func copyTranscript() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(fullText, forType: .string)
+
+        copyGeneration &+= 1
+        let generation = copyGeneration
+        isCopied = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.25))
+            guard copyGeneration == generation else { return }
+            isCopied = false
+        }
+    }
+}
+
+enum HistoryText {
+    static let previewCharacterLimit = 360
+
+    static func preview(_ text: String) -> String {
+        guard let boundary = text.index(
+            text.startIndex,
+            offsetBy: previewCharacterLimit,
+            limitedBy: text.endIndex
+        ), boundary != text.endIndex else {
+            return text
+        }
+        return String(text[..<boundary]).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+}
+
+private struct TranscriptDetailView: View {
+    let entry: DictationHistoryEntry
+    @Environment(\.dismiss) private var dismiss
+    @State private var isCopied = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                BrandWaveform()
+                    .frame(width: 76, height: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Full Transcript")
+                        .font(.title3.weight(.medium))
+                    Text("\(HistoryLabels.date(entry.createdAt))  ·  \(HistoryLabels.duration(entry.duration))  ·  \(entry.modelName)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(18)
+
+            DottedRule()
+                .padding(.horizontal, 18)
+
+            LargeSelectableTextView(text: fullText)
+                .padding(18)
+
+            HStack {
+                if isCopied {
+                    Label("Copied", systemImage: "checkmark")
+                        .foregroundStyle(.green)
+                        .font(.callout.weight(.medium))
+                }
+                Spacer()
+                Button("Copy All", action: copyAll)
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 16)
+        }
+        .frame(minWidth: 640, minHeight: 520)
+    }
+
+    private var fullText: String {
+        if !entry.transcript.isEmpty { return entry.transcript }
+        return entry.errorMessage ?? "No transcript was produced."
+    }
+
+    private func copyAll() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(fullText, forType: .string)
+        isCopied = true
+    }
+}
+
+private struct LargeSelectableTextView: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.drawsBackground = false
+        textView.font = .systemFont(ofSize: 14)
+        textView.textColor = .labelColor
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(
+            width: 0,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.string = text
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView,
+              textView.string != text
+        else { return }
+        textView.string = text
     }
 }
 

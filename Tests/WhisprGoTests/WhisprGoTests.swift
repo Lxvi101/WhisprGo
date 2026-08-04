@@ -95,6 +95,14 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertEqual(audioFiles.count, DictationHistoryPersistence.maximumEntryCount)
     }
 
+    func testHistoryPreviewBoundsVeryLongTranscripts() {
+        let longTranscript = String(repeating: "word ", count: 10_000)
+        let preview = HistoryText.preview(longTranscript)
+        XCTAssertTrue(preview.hasSuffix("…"))
+        XCTAssertLessThanOrEqual(preview.count, HistoryText.previewCharacterLimit + 1)
+        XCTAssertEqual(HistoryText.preview("Short transcript"), "Short transcript")
+    }
+
     func testAudioLevelMeterKeepsNewestValue() {
         let meter = AudioLevelMeter()
         meter.store(0.125)
