@@ -14,7 +14,7 @@ final class StartupAnimationController {
         dismissWorkItem?.cancel()
 
         let content = StartupLogoView(
-            frame: NSRect(x: 0, y: 0, width: 284, height: 112)
+            frame: NSRect(x: 0, y: 0, width: 300, height: 184)
         )
         let panel = NSPanel(
             contentRect: content.bounds,
@@ -50,25 +50,58 @@ final class StartupAnimationController {
         let dismiss = DispatchWorkItem { [weak self, weak content] in
             guard let self else { return }
             content?.finishAnimation(reduceMotion: reduceMotion)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.panel?.orderOut(nil)
                 self?.panel = nil
             }
         }
         dismissWorkItem = dismiss
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.18, execute: dismiss)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.08, execute: dismiss)
     }
 }
 
 @MainActor
 private final class StartupLogoView: NSView {
+    private struct WaveformColumn {
+        let x: CGFloat
+        let start: CGFloat
+        let count: Int
+    }
+
+    private static let waveform: [WaveformColumn] = [
+        .init(x: 30, start: 150, count: 1),
+        .init(x: 56, start: 140, count: 3),
+        .init(x: 82, start: 120, count: 5),
+        .init(x: 108, start: 130, count: 4),
+        .init(x: 134, start: 90, count: 6),
+        .init(x: 160, start: 60, count: 7),
+        .init(x: 186, start: 80, count: 6),
+        .init(x: 212, start: 120, count: 6),
+        .init(x: 238, start: 140, count: 7),
+        .init(x: 264, start: 120, count: 6),
+        .init(x: 290, start: 80, count: 9),
+        .init(x: 316, start: 40, count: 11),
+        .init(x: 342, start: 20, count: 13),
+        .init(x: 368, start: 40, count: 11),
+        .init(x: 394, start: 70, count: 9),
+        .init(x: 420, start: 110, count: 8),
+        .init(x: 446, start: 150, count: 8),
+        .init(x: 472, start: 170, count: 7),
+        .init(x: 498, start: 130, count: 9),
+        .init(x: 524, start: 90, count: 9),
+        .init(x: 550, start: 80, count: 8),
+        .init(x: 576, start: 100, count: 7),
+        .init(x: 602, start: 120, count: 6),
+        .init(x: 628, start: 130, count: 5),
+        .init(x: 654, start: 140, count: 3),
+        .init(x: 680, start: 150, count: 1),
+    ]
+
     private let mark = CALayer()
-    private let bars: [CALayer]
-    private let swoosh = CAShapeLayer()
+    private var columns: [CAShapeLayer] = []
     private let wordmark = CATextLayer()
 
     override init(frame frameRect: NSRect) {
-        bars = (0..<7).map { _ in CALayer() }
         super.init(frame: frameRect)
         configureLayers()
     }
@@ -88,58 +121,54 @@ private final class StartupLogoView: NSView {
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0
         fade.toValue = 1
-        fade.duration = reduceMotion ? 0.18 : 0.16
+        fade.duration = reduceMotion ? 0.18 : 0.14
         fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
         root.add(fade, forKey: "appear")
 
         guard !reduceMotion else { return }
 
         let settle = CASpringAnimation(keyPath: "transform.scale")
-        settle.fromValue = 0.88
+        settle.fromValue = 0.96
         settle.toValue = 1
         settle.mass = 1
-        settle.stiffness = 240
-        settle.damping = 30
+        settle.stiffness = 260
+        settle.damping = 32
         settle.initialVelocity = 0
-        settle.duration = min(0.5, settle.settlingDuration)
+        settle.duration = min(0.42, settle.settlingDuration)
         root.add(settle, forKey: "settle")
 
-        for (index, bar) in bars.enumerated() {
-            let bloom = CASpringAnimation(keyPath: "transform.scale.y")
-            bloom.fromValue = 0.08
+        for (index, column) in columns.enumerated() {
+            let delay = 0.025 + Double(index) * 0.011
+
+            let bloom = CASpringAnimation(keyPath: "transform.scale")
+            bloom.fromValue = 0.28
             bloom.toValue = 1
             bloom.mass = 1
-            bloom.stiffness = 290
-            bloom.damping = 27
+            bloom.stiffness = 300
+            bloom.damping = 28
             bloom.initialVelocity = 0
-            bloom.beginTime = now + 0.05 + Double(abs(index - 3)) * 0.025
-            bloom.duration = min(0.44, bloom.settlingDuration)
+            bloom.beginTime = now + delay
+            bloom.duration = min(0.38, bloom.settlingDuration)
             bloom.fillMode = .backwards
-            bar.add(bloom, forKey: "bloom")
+            column.add(bloom, forKey: "bloom")
+
+            let dotFade = CABasicAnimation(keyPath: "opacity")
+            dotFade.fromValue = 0
+            dotFade.toValue = 1
+            dotFade.beginTime = now + delay
+            dotFade.duration = 0.12
+            dotFade.fillMode = .backwards
+            column.add(dotFade, forKey: "fade")
         }
 
-        let draw = CABasicAnimation(keyPath: "strokeEnd")
-        draw.fromValue = 0
-        draw.toValue = 1
-        draw.beginTime = now + 0.24
-        draw.duration = 0.34
-        draw.fillMode = .backwards
-        draw.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        swoosh.add(draw, forKey: "draw")
-
-        let reveal = CAAnimationGroup()
         let wordFade = CABasicAnimation(keyPath: "opacity")
         wordFade.fromValue = 0
         wordFade.toValue = 1
-        let wordMove = CABasicAnimation(keyPath: "transform.translation.x")
-        wordMove.fromValue = -7
-        wordMove.toValue = 0
-        reveal.animations = [wordFade, wordMove]
-        reveal.beginTime = now + 0.2
-        reveal.duration = 0.28
-        reveal.fillMode = .backwards
-        reveal.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        wordmark.add(reveal, forKey: "reveal")
+        wordFade.beginTime = now + 0.28
+        wordFade.duration = 0.22
+        wordFade.fillMode = .backwards
+        wordFade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        wordmark.add(wordFade, forKey: "reveal")
     }
 
     func finishAnimation(reduceMotion: Bool) {
@@ -147,7 +176,7 @@ private final class StartupLogoView: NSView {
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = root.presentation()?.opacity ?? 1
         fade.toValue = 0
-        fade.duration = reduceMotion ? 0.16 : 0.18
+        fade.duration = reduceMotion ? 0.16 : 0.17
         fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
         fade.fillMode = .forwards
         fade.isRemovedOnCompletion = false
@@ -156,8 +185,8 @@ private final class StartupLogoView: NSView {
         guard !reduceMotion else { return }
         let scale = CABasicAnimation(keyPath: "transform.scale")
         scale.fromValue = 1
-        scale.toValue = 0.97
-        scale.duration = 0.18
+        scale.toValue = 0.98
+        scale.duration = 0.17
         scale.timingFunction = CAMediaTimingFunction(name: .easeIn)
         scale.fillMode = .forwards
         scale.isRemovedOnCompletion = false
@@ -172,88 +201,59 @@ private final class StartupLogoView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        root.backgroundColor = NSColor(
-            calibratedRed: 0.035,
-            green: 0.045,
-            blue: 0.075,
-            alpha: 0.97
-        ).cgColor
+        root.backgroundColor = NSColor.white.cgColor
         root.cornerRadius = 28
         root.cornerCurve = .continuous
         root.borderWidth = 1
-        root.borderColor = NSColor.white.withAlphaComponent(0.11).cgColor
+        root.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
         root.masksToBounds = true
 
-        mark.frame = CGRect(x: 22, y: 18, width: 78, height: 76)
+        let sourceScale: CGFloat = 0.35
+        let dotRadius: CGFloat = 1.75
+        let sourceSpacing: CGFloat = 20
+        mark.frame = CGRect(x: 24, y: 18, width: 252, height: 105)
         root.addSublayer(mark)
 
-        let heights: [CGFloat] = [22, 38, 58, 40, 50, 34, 22]
-        let colors = [
-            NSColor(calibratedRed: 0.71, green: 0.91, blue: 1, alpha: 1),
-            NSColor(calibratedRed: 0.58, green: 0.86, blue: 1, alpha: 1),
-            NSColor(calibratedRed: 0.44, green: 0.80, blue: 1, alpha: 1),
-            NSColor(calibratedRed: 0.38, green: 0.72, blue: 1, alpha: 1),
-            NSColor(calibratedRed: 0.43, green: 0.61, blue: 1, alpha: 1),
-            NSColor(calibratedRed: 0.48, green: 0.48, blue: 1, alpha: 1),
-            NSColor(calibratedRed: 0.58, green: 0.36, blue: 1, alpha: 1),
-        ]
-        let barWidth: CGFloat = 5
-        let spacing: CGFloat = 5.5
-        for (index, bar) in bars.enumerated() {
-            let height = heights[index]
-            bar.bounds = CGRect(x: 0, y: 0, width: barWidth, height: height)
-            bar.position = CGPoint(
-                x: 6 + barWidth / 2 + CGFloat(index) * (barWidth + spacing),
-                y: 33
+        for specification in Self.waveform {
+            let dotSpacing = sourceSpacing * sourceScale
+            let height = CGFloat(specification.count - 1) * dotSpacing + dotRadius * 2
+            let column = CAShapeLayer()
+            column.bounds = CGRect(x: 0, y: 0, width: dotRadius * 2, height: height)
+            column.position = CGPoint(
+                x: specification.x * sourceScale,
+                y: (specification.start
+                    + CGFloat(specification.count - 1) * sourceSpacing / 2) * sourceScale
             )
-            bar.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            bar.backgroundColor = colors[index].cgColor
-            bar.cornerRadius = barWidth / 2
-            mark.addSublayer(bar)
+            column.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+
+            let path = CGMutablePath()
+            for dotIndex in 0..<specification.count {
+                path.addEllipse(in: CGRect(
+                    x: 0,
+                    y: CGFloat(dotIndex) * dotSpacing,
+                    width: dotRadius * 2,
+                    height: dotRadius * 2
+                ))
+            }
+            column.path = path
+            column.fillColor = NSColor(calibratedWhite: 0.04, alpha: 1).cgColor
+            mark.addSublayer(column)
+            columns.append(column)
         }
 
-        let swooshPath = CGMutablePath()
-        swooshPath.move(to: CGPoint(x: 8, y: 66))
-        swooshPath.addCurve(
-            to: CGPoint(x: 66, y: 56),
-            control1: CGPoint(x: 27, y: 76),
-            control2: CGPoint(x: 52, y: 72)
-        )
-        swooshPath.addLine(to: CGPoint(x: 61, y: 51))
-        swooshPath.move(to: CGPoint(x: 66, y: 56))
-        swooshPath.addLine(to: CGPoint(x: 59, y: 58))
-        swoosh.path = swooshPath
-        swoosh.fillColor = nil
-        swoosh.strokeColor = NSColor(
-            calibratedRed: 0.48,
-            green: 0.43,
-            blue: 1,
-            alpha: 1
-        ).cgColor
-        swoosh.lineWidth = 4
-        swoosh.lineCap = .round
-        swoosh.lineJoin = .round
-        mark.addSublayer(swoosh)
-
-        let text = NSMutableAttributedString(
+        wordmark.string = NSAttributedString(
             string: "WhisprGo",
             attributes: [
-                .font: NSFont.systemFont(ofSize: 29, weight: .semibold),
-                .foregroundColor: NSColor.white,
-                .kern: -1.05,
+                .font: NSFont.systemFont(ofSize: 39, weight: .regular),
+                .foregroundColor: NSColor(calibratedWhite: 0.04, alpha: 1),
+                .kern: -1.6,
             ]
         )
-        text.addAttribute(
-            .foregroundColor,
-            value: NSColor(calibratedRed: 0.57, green: 0.43, blue: 1, alpha: 1),
-            range: NSRange(location: 6, length: 2)
-        )
-        wordmark.string = text
-        wordmark.frame = CGRect(x: 108, y: 38, width: 158, height: 42)
+        wordmark.frame = CGRect(x: 42, y: 130, width: 216, height: 48)
         wordmark.contentsScale = window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
-        wordmark.alignmentMode = .left
+        wordmark.alignmentMode = .center
         root.addSublayer(wordmark)
 
         CATransaction.commit()

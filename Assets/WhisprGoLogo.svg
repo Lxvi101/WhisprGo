@@ -1,31 +1,32 @@
-<svg width="914" height="180" viewBox="0 0 914 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="background" x1="18" y1="12" x2="164" y2="168" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#161B2B"/>
-      <stop offset="1" stop-color="#080A10"/>
-    </linearGradient>
-    <linearGradient id="voice" x1="42" y1="42" x2="142" y2="126" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F7FBFF"/>
-      <stop offset="0.48" stop-color="#72D7FF"/>
-      <stop offset="1" stop-color="#8B5CFF"/>
-    </linearGradient>
-    <linearGradient id="motion" x1="44" y1="132" x2="146" y2="116" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2ECFFF"/>
-      <stop offset="1" stop-color="#9C63FF"/>
-    </linearGradient>
-  </defs>
-  <rect x="8" y="8" width="164" height="164" rx="42" fill="url(#background)"/>
-  <rect x="8.75" y="8.75" width="162.5" height="162.5" rx="41.25" stroke="white" stroke-opacity="0.12" stroke-width="1.5"/>
-  <g fill="url(#voice)">
-    <rect x="45" y="80" width="8" height="28" rx="4"/>
-    <rect x="57" y="64" width="8" height="50" rx="4"/>
-    <rect x="69" y="48" width="8" height="76" rx="4"/>
-    <rect x="81" y="61" width="8" height="52" rx="4"/>
-    <rect x="93" y="51" width="8" height="66" rx="4"/>
-    <rect x="105" y="65" width="8" height="44" rx="4"/>
-    <rect x="117" y="76" width="8" height="28" rx="4"/>
+<svg width="840" height="500" viewBox="0 0 840 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="840" height="500" fill="white"/>
+  <g transform="translate(129 36) scale(0.82 1)" stroke="#0A0A0A" stroke-width="8" stroke-linecap="round" stroke-dasharray="0.01 20">
+    <path d="M30 150v0.01"/>
+    <path d="M56 140v40.01"/>
+    <path d="M82 120v80.01"/>
+    <path d="M108 130v60.01"/>
+    <path d="M134 90v100.01"/>
+    <path d="M160 60v120.01"/>
+    <path d="M186 80v100.01"/>
+    <path d="M212 120v100.01"/>
+    <path d="M238 140v120.01"/>
+    <path d="M264 120v100.01"/>
+    <path d="M290 80v160.01"/>
+    <path d="M316 40v200.01"/>
+    <path d="M342 20v240.01"/>
+    <path d="M368 40v200.01"/>
+    <path d="M394 70v160.01"/>
+    <path d="M420 110v140.01"/>
+    <path d="M446 150v140.01"/>
+    <path d="M472 170v120.01"/>
+    <path d="M498 130v160.01"/>
+    <path d="M524 90v160.01"/>
+    <path d="M550 80v140.01"/>
+    <path d="M576 100v120.01"/>
+    <path d="M602 120v100.01"/>
+    <path d="M628 130v80.01"/>
+    <path d="M654 140v40.01"/>
+    <path d="M680 150v0.01"/>
   </g>
-  <path d="M48 132C70 145 106 142 129 116" stroke="url(#motion)" stroke-width="5" stroke-linecap="round"/>
-  <path d="M126 116H136L131 107" stroke="#9C63FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="205" y="119" fill="#12141B" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="86" font-weight="680" letter-spacing="-3.2">Whispr<tspan fill="#7257E8">Go</tspan></text>
+  <text x="420" y="440" text-anchor="middle" fill="#0A0A0A" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="112" font-weight="400" letter-spacing="-2.5">WhisprGo</text>
 </svg>
