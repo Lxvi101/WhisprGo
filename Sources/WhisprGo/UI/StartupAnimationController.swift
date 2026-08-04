@@ -220,7 +220,7 @@ private final class StartupLogoView: NSVisualEffectView {
         guard let root = layer else { return }
         root.cornerRadius = 28
         root.cornerCurve = .continuous
-        root.borderWidth = 1
+        root.borderWidth = 0
         root.masksToBounds = true
         updateAdaptiveColors()
     }
@@ -293,9 +293,6 @@ private final class StartupLogoView: NSVisualEffectView {
             ? NSColor.windowBackgroundColor
             : NSColor.windowBackgroundColor.withAlphaComponent(0.2)
         root.backgroundColor = fill.cgColor
-        root.borderColor = NSColor.separatorColor.withAlphaComponent(
-            reduceTransparency ? 0.42 : 0.26
-        ).cgColor
 
         let markColor = NSColor.labelColor.cgColor
         dotLayers.forEach { $0.fillColor = markColor }
