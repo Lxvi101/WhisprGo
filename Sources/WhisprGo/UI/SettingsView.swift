@@ -535,7 +535,7 @@ private struct GeneralSettingsPane: View {
 
                     LabeledContent("Paste last dictation") {
                         HStack(spacing: 5) {
-                            MinimalKeyCap("⌃")
+                            MinimalKeyCap("⌘")
                             MinimalKeyCap("⌥")
                             MinimalKeyCap("V")
                         }

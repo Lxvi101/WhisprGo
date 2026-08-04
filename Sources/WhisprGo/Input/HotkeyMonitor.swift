@@ -184,7 +184,7 @@ final class HotkeyMonitor {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: eventMask,
             callback: hotkeyEventCallback,
             userInfo: userInfo
@@ -218,13 +218,15 @@ final class HotkeyMonitor {
         modeShortcutState = ModeShortcutState()
     }
 
-    fileprivate func handle(type: CGEventType, event: CGEvent) {
+    /// Returns true only for the paste-last chord so the event tap can keep
+    /// Command-Option-V from reaching the foreground application as well.
+    fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             modeShortcutState = ModeShortcutState()
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
-            return
+            return false
         }
         if let modeAction = modeShortcutState.consume(
             type: type,
@@ -240,6 +242,11 @@ final class HotkeyMonitor {
         }
 
         let keyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        let shouldSuppress = Self.isPasteLastChord(
+            type: type,
+            keyCode: keyCode,
+            flags: event.flags
+        )
         if Self.isPasteLastShortcut(
             type: type,
             keyCode: keyCode,
@@ -249,7 +256,7 @@ final class HotkeyMonitor {
             onEvent?(.pasteLast)
         }
 
-        guard type == .flagsChanged else { return }
+        guard type == .flagsChanged else { return shouldSuppress }
         let actions = gestureState.consume(
             flags: event.flags,
             pushToTalkIsActive: pushToTalkIsActive
@@ -257,6 +264,21 @@ final class HotkeyMonitor {
         for action in actions {
             perform(action)
         }
+        return shouldSuppress
+    }
+
+    static func isPasteLastChord(
+        type: CGEventType,
+        keyCode: CGKeyCode,
+        flags: CGEventFlags
+    ) -> Bool {
+        type == .keyDown
+            && keyCode == 9
+            && flags.contains(.maskCommand)
+            && flags.contains(.maskAlternate)
+            && !flags.contains(.maskControl)
+            && !flags.contains(.maskShift)
+            && !flags.contains(.maskSecondaryFn)
     }
 
     static func isPasteLastShortcut(
@@ -265,14 +287,8 @@ final class HotkeyMonitor {
         flags: CGEventFlags,
         isRepeat: Bool = false
     ) -> Bool {
-        type == .keyDown
-            && keyCode == 9
+        Self.isPasteLastChord(type: type, keyCode: keyCode, flags: flags)
             && !isRepeat
-            && flags.contains(.maskControl)
-            && flags.contains(.maskAlternate)
-            && !flags.contains(.maskCommand)
-            && !flags.contains(.maskShift)
-            && !flags.contains(.maskSecondaryFn)
     }
 
     private func perform(_ action: HotkeyGestureState.Action) {
@@ -315,6 +331,7 @@ private func hotkeyEventCallback(
 ) -> Unmanaged<CGEvent>? {
     guard let userInfo else { return Unmanaged.passUnretained(event) }
     let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(userInfo).takeUnretainedValue()
-    monitor.handle(type: type, event: event)
-    return Unmanaged.passUnretained(event)
+    return monitor.handle(type: type, event: event)
+        ? nil
+        : Unmanaged.passUnretained(event)
 }

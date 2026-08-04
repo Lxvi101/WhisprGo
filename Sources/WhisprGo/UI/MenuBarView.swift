@@ -304,7 +304,7 @@ private struct ShortcutGuide: View {
                 Spacer()
                 Button(action: engine.pasteLastDictation) {
                     HStack(spacing: 5) {
-                        MinimalKeyCap("⌃")
+                        MinimalKeyCap("⌘")
                         MinimalKeyCap("⌥")
                         MinimalKeyCap("V")
                         Text("paste last")

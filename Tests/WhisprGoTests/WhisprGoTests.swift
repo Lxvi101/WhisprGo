@@ -100,11 +100,16 @@ final class WhisprGoTests: XCTestCase {
         ))
     }
 
-    func testPasteLastShortcutRequiresExactControlOptionVChord() {
+    func testPasteLastShortcutRequiresExactCommandOptionVChord() {
         XCTAssertTrue(HotkeyMonitor.isPasteLastShortcut(
             type: .keyDown,
             keyCode: 9,
-            flags: [.maskControl, .maskAlternate]
+            flags: [.maskCommand, .maskAlternate]
+        ))
+        XCTAssertTrue(HotkeyMonitor.isPasteLastChord(
+            type: .keyDown,
+            keyCode: 9,
+            flags: [.maskCommand, .maskAlternate]
         ))
         XCTAssertFalse(HotkeyMonitor.isPasteLastShortcut(
             type: .keyDown,
@@ -114,18 +119,23 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertFalse(HotkeyMonitor.isPasteLastShortcut(
             type: .keyDown,
             keyCode: 9,
-            flags: [.maskControl, .maskAlternate, .maskShift]
+            flags: [.maskCommand, .maskAlternate, .maskShift]
         ))
         XCTAssertFalse(HotkeyMonitor.isPasteLastShortcut(
             type: .keyUp,
             keyCode: 9,
-            flags: [.maskControl, .maskAlternate]
+            flags: [.maskCommand, .maskAlternate]
         ))
         XCTAssertFalse(HotkeyMonitor.isPasteLastShortcut(
             type: .keyDown,
             keyCode: 9,
-            flags: [.maskControl, .maskAlternate],
+            flags: [.maskCommand, .maskAlternate],
             isRepeat: true
+        ))
+        XCTAssertFalse(HotkeyMonitor.isPasteLastShortcut(
+            type: .keyDown,
+            keyCode: 9,
+            flags: [.maskControl, .maskAlternate]
         ))
     }
 
