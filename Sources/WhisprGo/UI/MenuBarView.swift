@@ -21,6 +21,10 @@ struct MenuBarView: View {
 
                 ShortcutGuide(engine: engine)
 
+                if let error = engine.lastError {
+                    MenuErrorNotice(message: error)
+                }
+
                 if case let .downloading(progress) = engine.modelState {
                     DownloadProgress(progress: progress)
                 }
@@ -211,6 +215,44 @@ struct MenuBarView: View {
             get: { engine.dictationMode },
             set: { engine.setDictationMode($0) }
         )
+    }
+}
+
+private struct MenuErrorNotice: View {
+    let message: String
+    @State private var didCopy = false
+
+    var body: some View {
+        MinimalPanel {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    DottedSectionLabel("Needs Attention")
+                    Spacer()
+                    Button(action: copyDetails) {
+                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(didCopy ? Color.green : Color.secondary)
+                    .help(didCopy ? "Copied" : "Copy error details")
+                    .accessibilityLabel(didCopy ? "Error copied" : "Copy error details")
+                }
+
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(5)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func copyDetails() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(message, forType: .string)
+        didCopy = true
     }
 }
 

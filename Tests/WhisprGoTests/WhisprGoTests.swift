@@ -210,6 +210,7 @@ final class WhisprGoTests: XCTestCase {
                 (json["text"] as? [String: Any])?["verbosity"] as? String,
                 "low"
             )
+            XCTAssertGreaterThanOrEqual(json["max_output_tokens"] as? Int ?? 0, 2_048)
 
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -227,6 +228,62 @@ final class WhisprGoTests: XCTestCase {
             session: session
         ).polish("um I took the bus or no the taxi", context: nil)
         XCTAssertEqual(output, "I took the taxi.")
+    }
+
+    func testProClientExplainsIncompleteResponse() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProModeURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        ProModeURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let data = Data(#"{"id":"resp_limit","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}"#.utf8)
+            return (response, data)
+        }
+        defer { ProModeURLProtocol.handler = nil }
+
+        do {
+            _ = try await OpenAITextClient(
+                apiKey: "test-key",
+                session: session
+            ).polish("A short dictation", context: nil)
+            XCTFail("Expected an incomplete-response error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("output limit"))
+        }
+    }
+
+    func testProClientSurfacesRefusalText() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProModeURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        ProModeURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let data = Data(#"{"id":"resp_refusal","status":"completed","output":[{"content":[{"type":"refusal","refusal":"This request cannot be processed."}]}]}"#.utf8)
+            return (response, data)
+        }
+        defer { ProModeURLProtocol.handler = nil }
+
+        do {
+            _ = try await OpenAITextClient(
+                apiKey: "test-key",
+                session: session
+            ).polish("A short dictation", context: nil)
+            XCTFail("Expected a refusal error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("cannot be processed"))
+        }
     }
 
     func testSanitizerRemovesNonSpeechTokensAndWhitespace() {

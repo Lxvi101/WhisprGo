@@ -76,7 +76,11 @@ final class OpenAITextClient {
             ),
             reasoning: .init(effort: "none"),
             text: .init(verbosity: "low"),
-            maxOutputTokens: max(128, min(4_096, rawTranscript.utf8.count / 2 + 128)),
+            // A limit can be reached before any visible text is emitted. A
+            // generous floor does not make short cleanup responses longer;
+            // it only prevents an otherwise successful response from ending
+            // as `incomplete` with no output.
+            maxOutputTokens: max(2_048, min(8_192, rawTranscript.utf8.count * 2 + 512)),
             store: false
         ))
 
@@ -92,14 +96,55 @@ final class OpenAITextClient {
             )
         }
 
-        let decoded = try JSONDecoder().decode(ResponseEnvelope.self, from: data)
+        let decoded: ResponseEnvelope
+        do {
+            decoded = try JSONDecoder().decode(ResponseEnvelope.self, from: data)
+        } catch {
+            throw ProTranscriptionError.invalidResponse
+        }
+
+        if let responseError = decoded.error {
+            throw ProTranscriptionError.remote(responseError.message)
+        }
+
+        if decoded.status == "incomplete" {
+            switch decoded.incompleteDetails?.reason {
+            case "max_output_tokens":
+                throw ProTranscriptionError.incomplete(
+                    "OpenAI reached its output limit before producing cleaned text."
+                )
+            case "content_filter":
+                throw ProTranscriptionError.incomplete(
+                    "OpenAI stopped the cleanup because its content filter was triggered."
+                )
+            case let reason?:
+                throw ProTranscriptionError.incomplete(
+                    "OpenAI returned an incomplete response (\(reason))."
+                )
+            case nil:
+                throw ProTranscriptionError.incomplete(
+                    "OpenAI returned an incomplete response."
+                )
+            }
+        }
+
+        if let refusal = decoded.output
+            .flatMap({ $0.content ?? [] })
+            .compactMap(\.refusal)
+            .first(where: { !$0.isEmpty }) {
+            throw ProTranscriptionError.remote("OpenAI refused the cleanup: \(refusal)")
+        }
+
         let output = decoded.output
             .flatMap { $0.content ?? [] }
             .filter { $0.type == "output_text" }
             .compactMap(\.text)
             .joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !output.isEmpty else { throw ProTranscriptionError.emptyOutput }
+        guard !output.isEmpty else {
+            let suffix = decoded.id.map { " Response ID: \($0)." } ?? ""
+            throw ProTranscriptionError.emptyOutput(suffix)
+        }
         return Self.removingAccidentalFence(from: output)
     }
 
@@ -193,16 +238,37 @@ private struct ResponseRequest: Encodable {
 }
 
 private struct ResponseEnvelope: Decodable {
+    struct ResponseError: Decodable {
+        let message: String
+    }
+
+    struct IncompleteDetails: Decodable {
+        let reason: String?
+    }
+
     struct OutputItem: Decodable {
         struct Content: Decodable {
             let type: String
             let text: String?
+            let refusal: String?
         }
 
         let content: [Content]?
     }
 
+    let id: String?
+    let status: String?
+    let error: ResponseError?
+    let incompleteDetails: IncompleteDetails?
     let output: [OutputItem]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case error
+        case incompleteDetails = "incomplete_details"
+        case output
+    }
 }
 
 private struct APIErrorEnvelope: Decodable {
@@ -213,7 +279,8 @@ private struct APIErrorEnvelope: Decodable {
 enum ProTranscriptionError: LocalizedError {
     case missingAPIKey
     case invalidResponse
-    case emptyOutput
+    case emptyOutput(String)
+    case incomplete(String)
     case remote(String)
 
     var errorDescription: String? {
@@ -222,8 +289,10 @@ enum ProTranscriptionError: LocalizedError {
             return "Pro Mode needs an OpenAI API key."
         case .invalidResponse:
             return "Pro Mode received an invalid response."
-        case .emptyOutput:
-            return "Pro Mode returned no cleaned text."
+        case let .emptyOutput(suffix):
+            return "OpenAI completed the request but returned no cleaned text.\(suffix)"
+        case let .incomplete(message):
+            return message
         case let .remote(message):
             return message
         }

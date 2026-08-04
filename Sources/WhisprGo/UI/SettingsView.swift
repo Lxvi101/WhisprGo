@@ -220,9 +220,10 @@ private struct HistoryRow: View {
                             Text("\(latency.formatted(.number.precision(.fractionLength(2))))s")
                                 .monospacedDigit()
                         }
-                        if entry.errorMessage != nil {
+                        if let error = entry.errorMessage {
                             Text("·")
-                            Text("Needs attention")
+                            Text(error)
+                                .help(error)
                         }
                     }
                     .font(.caption2)
@@ -361,6 +362,20 @@ private struct TranscriptDetailView: View {
 
             DottedRule()
                 .padding(.horizontal, 18)
+
+            if let error = entry.errorMessage {
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+            }
 
             LargeSelectableTextView(text: fullText)
                 .padding(18)
