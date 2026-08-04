@@ -1,0 +1,38 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="background" x1="146" y1="96" x2="878" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#171D31"/>
+      <stop offset="0.52" stop-color="#0D101A"/>
+      <stop offset="1" stop-color="#06070B"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(536 440) rotate(90) scale(480)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3AAFFF" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#3AAFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="voice" x1="254" y1="258" x2="760" y2="702" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.44" stop-color="#72D7FF"/>
+      <stop offset="1" stop-color="#8B5CFF"/>
+    </linearGradient>
+    <linearGradient id="motion" x1="276" y1="726" x2="798" y2="580" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2ECFFF"/>
+      <stop offset="1" stop-color="#9C63FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="url(#background)"/>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="url(#glow)"/>
+  <rect x="56" y="56" width="912" height="912" rx="208" stroke="white" stroke-opacity="0.12" stroke-width="16"/>
+  <g>
+    <g fill="url(#voice)">
+      <rect x="254" y="442" width="48" height="162" rx="24"/>
+      <rect x="326" y="352" width="48" height="286" rx="24"/>
+      <rect x="398" y="258" width="48" height="432" rx="24"/>
+      <rect x="470" y="334" width="48" height="296" rx="24"/>
+      <rect x="542" y="278" width="48" height="376" rx="24"/>
+      <rect x="614" y="354" width="48" height="248" rx="24"/>
+      <rect x="686" y="414" width="48" height="156" rx="24"/>
+    </g>
+    <path d="M276 726C410 806 624 784 760 626" stroke="url(#motion)" stroke-width="28" stroke-linecap="round"/>
+    <path d="M744 626H798L772 580" stroke="#9C63FF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

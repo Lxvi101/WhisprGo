@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="voice" x1="250" y1="260" x2="760" y2="700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FBFF"/>
+      <stop offset="0.46" stop-color="#72D7FF"/>
+      <stop offset="1" stop-color="#8B5CFF"/>
+    </linearGradient>
+    <linearGradient id="motion" x1="280" y1="720" x2="770" y2="610" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2ECFFF"/>
+      <stop offset="1" stop-color="#9C63FF"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#voice)">
+    <rect x="254" y="442" width="48" height="162" rx="24"/>
+    <rect x="326" y="352" width="48" height="286" rx="24"/>
+    <rect x="398" y="258" width="48" height="432" rx="24"/>
+    <rect x="470" y="334" width="48" height="296" rx="24"/>
+    <rect x="542" y="278" width="48" height="376" rx="24"/>
+    <rect x="614" y="354" width="48" height="248" rx="24"/>
+    <rect x="686" y="414" width="48" height="156" rx="24"/>
+  </g>
+  <path d="M276 726C410 806 624 784 760 626" stroke="url(#motion)" stroke-width="28" stroke-linecap="round"/>
+  <path d="M744 626H798L772 580" stroke="#9C63FF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
