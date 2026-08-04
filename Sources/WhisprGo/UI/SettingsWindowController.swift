@@ -18,7 +18,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let window = NSWindow(contentViewController: hostingController)
             window.title = "WhisprGo Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 620, height: 490))
+            window.setContentSize(NSSize(width: 660, height: 520))
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()

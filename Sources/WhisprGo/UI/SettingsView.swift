@@ -6,16 +6,17 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsPane(engine: engine)
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label("General", systemImage: "slider.horizontal.3") }
 
             ModelSettingsPane(engine: engine)
-                .tabItem { Label("Models", systemImage: "cpu") }
+                .tabItem { Label("Models", systemImage: "circle.grid.3x3") }
 
             ProviderSettingsPane(engine: engine)
                 .tabItem { Label("Providers", systemImage: "key") }
         }
+        .tint(.primary)
         .scenePadding()
-        .frame(width: 620, height: 490)
+        .frame(width: 660, height: 520)
         .onAppear {
             engine.refreshPermissions()
         }
@@ -26,106 +27,113 @@ private struct GeneralSettingsPane: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        Form {
-            Section("Dictation") {
-                LabeledContent("Push to talk") {
-                    HStack(spacing: 6) {
-                        Text("fn")
-                            .modifier(SettingsKeyCap())
-                        Text("Hold")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                LabeledContent("Toggle") {
-                    HStack(spacing: 6) {
-                        Text("fn")
-                            .modifier(SettingsKeyCap())
-                        Text("+").foregroundStyle(.secondary)
-                        Text("⇧")
-                            .modifier(SettingsKeyCap())
-                    }
-                }
-
-                Toggle("Add a space after each dictation", isOn: $engine.appendTrailingSpace)
-            }
-
-            Section("Background") {
-                Toggle(
-                    "Launch WhisprGo at login",
-                    isOn: Binding(
-                        get: { engine.launchAtLogin },
-                        set: { engine.setLaunchAtLogin($0) }
-                    )
-                )
-                Text("WhisprGo stays available from the menu bar.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Audio input") {
-                Toggle(
-                    "Use the Mac microphone instead of AirPods",
-                    isOn: Binding(
-                        get: { engine.preferBuiltInMicrophone },
-                        set: { engine.setPreferBuiltInMicrophone($0) }
-                    )
-                )
-                .disabled(engine.activity != .idle)
-
-                Text("On by default. WhisprGo records from \(engine.microphoneRouteDescription) while leaving AirPods available for high-quality playback.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Instant response") {
-                Toggle(
-                    "Keep microphone active between dictations",
-                    isOn: Binding(
-                        get: { engine.keepMicrophoneActive },
-                        set: { engine.setKeepMicrophoneActive($0) }
-                    )
-                )
-                .disabled(engine.activity != .idle)
-
-                Text("Off by default. When enabled, the selected input stays active for near-instant starts. Idle audio is discarded immediately and is never saved or transcribed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Permissions") {
-                PermissionRow(
-                    title: "Microphone",
-                    isGranted: engine.permissions.microphone
-                )
-                PermissionRow(
-                    title: "Accessibility",
-                    isGranted: engine.permissions.accessibility
-                )
-
-                HStack {
-                    Button("Request Permissions") {
-                        engine.requestPermissions()
-                    }
-                    Button("Open Accessibility Settings") {
-                        engine.openAccessibilitySettings()
-                    }
-                    Button("Check Again") {
-                        engine.refreshPermissions()
-                    }
-                }
-            }
-
-            if let error = engine.lastError {
+        SettingsPaneContainer(
+            title: "General",
+            subtitle: "Shortcuts, audio routing, and background behavior"
+        ) {
+            Form {
                 Section {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .font(.callout)
+                    LabeledContent("Push to talk") {
+                        HStack(spacing: 7) {
+                            MinimalKeyCap("fn")
+                            Text("Hold")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    LabeledContent("Hands-free toggle") {
+                        HStack(spacing: 6) {
+                            MinimalKeyCap("fn")
+                            Text("+").foregroundStyle(.tertiary)
+                            MinimalKeyCap("⇧")
+                        }
+                    }
+
+                    Toggle("Add a space after each dictation", isOn: $engine.appendTrailingSpace)
+                } header: {
+                    DottedSectionLabel("Dictation")
+                }
+
+                Section {
+                    Toggle(
+                        "Launch WhisprGo at login",
+                        isOn: Binding(
+                            get: { engine.launchAtLogin },
+                            set: { engine.setLaunchAtLogin($0) }
+                        )
+                    )
+                    Text("WhisprGo stays available from the menu bar.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    DottedSectionLabel("Background")
+                }
+
+                Section {
+                    Toggle(
+                        "Use the Mac microphone instead of AirPods",
+                        isOn: Binding(
+                            get: { engine.preferBuiltInMicrophone },
+                            set: { engine.setPreferBuiltInMicrophone($0) }
+                        )
+                    )
+                    .disabled(engine.activity != .idle)
+
+                    Text("On by default. Input is currently \(engine.microphoneRouteDescription), leaving AirPods available for high-quality playback.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    DottedSectionLabel("Audio Input")
+                }
+
+                Section {
+                    Toggle(
+                        "Keep microphone active between dictations",
+                        isOn: Binding(
+                            get: { engine.keepMicrophoneActive },
+                            set: { engine.setKeepMicrophoneActive($0) }
+                        )
+                    )
+                    .disabled(engine.activity != .idle)
+
+                    Text("Off by default. When enabled, idle audio is discarded immediately and is never saved or transcribed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    DottedSectionLabel("Instant Response")
+                }
+
+                Section {
+                    PermissionRow(title: "Microphone", isGranted: engine.permissions.microphone)
+                    PermissionRow(title: "Accessibility", isGranted: engine.permissions.accessibility)
+
+                    HStack {
+                        Button("Request Permissions") {
+                            engine.requestPermissions()
+                        }
+                        Button("Open Accessibility") {
+                            engine.openAccessibilitySettings()
+                        }
+                        Button("Check Again") {
+                            engine.refreshPermissions()
+                        }
+                    }
+                } header: {
+                    DottedSectionLabel("Permissions")
+                }
+
+                if let error = engine.lastError {
+                    Section {
+                        HStack(alignment: .top, spacing: 9) {
+                            DotSelectionIndicator(isSelected: false)
+                            Text(error)
+                                .font(.callout)
+                        }
+                    }
                 }
             }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .padding(.top, 8)
     }
 }
 
@@ -133,22 +141,27 @@ private struct ModelSettingsPane: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                ModelSection(
-                    title: "On Device",
-                    subtitle: "Private, offline, and accelerated by Apple silicon.",
-                    models: ModelCatalog.local,
-                    engine: engine
-                )
-                ModelSection(
-                    title: "OpenAI",
-                    subtitle: "Uses your API key. Audio is sent only when you finish speaking.",
-                    models: ModelCatalog.cloud,
-                    engine: engine
-                )
+        SettingsPaneContainer(
+            title: "Models",
+            subtitle: "Local-first by default, cloud-ready when you need it"
+        ) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    ModelSection(
+                        title: "On Device",
+                        subtitle: "Private, offline, and accelerated by Apple silicon.",
+                        models: ModelCatalog.local,
+                        engine: engine
+                    )
+                    ModelSection(
+                        title: "OpenAI",
+                        subtitle: "Uses your API key. Audio is sent only after you finish speaking.",
+                        models: ModelCatalog.cloud,
+                        engine: engine
+                    )
+                }
+                .padding(18)
             }
-            .padding(16)
         }
     }
 }
@@ -160,9 +173,8 @@ private struct ModelSection: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(title)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            DottedSectionLabel(title)
             Text(subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -190,18 +202,14 @@ private struct ModelRow: View {
                 engine.selectModel(model.id)
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    DotSelectionIndicator(isSelected: isSelected)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 7) {
                             Text(model.name)
                                 .font(.body.weight(.medium))
                             if model.recommended {
-                                Text("RECOMMENDED")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(Color.accentColor)
+                                MinimalBadge("Default", filled: isSelected)
                             }
                         }
                         Text(model.detail)
@@ -219,7 +227,7 @@ private struct ModelRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .padding(11)
+                .padding(12)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -227,31 +235,33 @@ private struct ModelRow: View {
             .accessibilityLabel("\(model.name), \(status(for: model))")
 
             if isDownloaded {
-                Button {
-                    isConfirmingRemoval = true
-                } label: {
-                    Label("Remove", systemImage: "trash")
-                        .font(.caption)
-                        .labelStyle(.titleAndIcon)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Button {
+                        isConfirmingRemoval = true
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!engine.canRemoveDownloadedModel(model.id))
+
+                    if isSelected {
+                        Text("Switch model first")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
-                .buttonStyle(.borderless)
-                .disabled(!engine.canRemoveDownloadedModel(model.id))
-                .help(
-                    isSelected
-                        ? "Choose another model first, then remove this download."
-                        : "Delete this model from your Mac."
-                )
-                .padding(.trailing, 11)
+                .padding(.trailing, 12)
             }
         }
         .background(
-            isSelected ? Color.accentColor.opacity(0.08) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 10)
+            Color.primary.opacity(isSelected ? 0.055 : 0.012),
+            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(
-                    isSelected ? Color.accentColor.opacity(0.4) : Color.secondary.opacity(0.16),
+                    Color.primary.opacity(isSelected ? 0.52 : 0.12),
                     lineWidth: 1
                 )
         }
@@ -261,7 +271,7 @@ private struct ModelRow: View {
                 engine.removeDownloadedModel(model.id)
             }
         } message: {
-            Text("This frees \(model.sizeLabel ?? "its") of storage. You can download it again anytime by selecting it.")
+            Text("This frees \(model.sizeLabel ?? "its downloaded data") of storage. Selecting it later downloads it again automatically.")
         }
     }
 
@@ -295,55 +305,67 @@ private struct ProviderSettingsPane: View {
     @State private var didSave = false
 
     var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 12) {
-                    Image(systemName: "sparkles")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("OpenAI")
-                            .font(.headline)
-                        Text(engine.openAIKeyConfigured ? "API key configured" : "No API key saved")
-                            .font(.caption)
-                            .foregroundStyle(engine.openAIKeyConfigured ? .green : .secondary)
+        SettingsPaneContainer(
+            title: "Providers",
+            subtitle: "Optional cloud transcription, stored securely"
+        ) {
+            Form {
+                Section {
+                    HStack(spacing: 14) {
+                        BrandWaveform()
+                            .frame(width: 74, height: 41)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("OpenAI")
+                                .font(.headline)
+                            Text(engine.openAIKeyConfigured ? "API key configured" : "No API key saved")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        MinimalBadge(
+                            engine.openAIKeyConfigured ? "Ready" : "Optional",
+                            filled: engine.openAIKeyConfigured
+                        )
                     }
                 }
-            }
 
-            Section("API Key") {
-                SecureField("sk-…", text: $apiKey)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(save)
+                Section {
+                    SecureField("sk-…", text: $apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(save)
 
-                HStack {
-                    Button("Save in Keychain", action: save)
-                        .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    HStack {
+                        Button("Save in Keychain", action: save)
+                            .buttonStyle(.borderedProminent)
+                            .tint(.primary)
+                            .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    if engine.openAIKeyConfigured {
-                        Button("Remove Key", role: .destructive) {
-                            if engine.saveOpenAIAPIKey("") {
-                                apiKey = ""
+                        if engine.openAIKeyConfigured {
+                            Button("Remove Key", role: .destructive) {
+                                if engine.saveOpenAIAPIKey("") {
+                                    apiKey = ""
+                                }
                             }
                         }
-                    }
 
-                    if didSave {
-                        Label("Saved", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.caption)
+                        if didSave {
+                            MinimalBadge("Saved", filled: true)
+                        }
                     }
+                } header: {
+                    DottedSectionLabel("API Key")
+                }
+
+                Section {
+                    Text("The key is stored in macOS Keychain. It is never written to preferences, logs, or source files. Local models never send audio over the network.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    DottedSectionLabel("Privacy")
                 }
             }
-
-            Section("Privacy") {
-                Text("The key is stored in macOS Keychain. It is never written to preferences, logs, or source files. Local models never send audio over the network.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
-        .padding(.top, 8)
     }
 
     private func save() {
@@ -357,6 +379,47 @@ private struct ProviderSettingsPane: View {
     }
 }
 
+private struct SettingsPaneContainer<Content: View>: View {
+    let title: String
+    let subtitle: String
+    private let content: Content
+
+    init(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                BrandWaveform()
+                    .frame(width: 76, height: 42)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 20, weight: .medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 11)
+
+            DottedRule()
+                .padding(.horizontal, 20)
+
+            content
+        }
+    }
+}
+
 private struct PermissionRow: View {
     let title: String
     let isGranted: Bool
@@ -365,21 +428,12 @@ private struct PermissionRow: View {
         HStack {
             Text(title)
             Spacer()
-            Label(
-                isGranted ? "Allowed" : "Required",
-                systemImage: isGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
-            )
-            .foregroundStyle(isGranted ? .green : .orange)
+            HStack(spacing: 7) {
+                DotSelectionIndicator(isSelected: isGranted)
+                Text(isGranted ? "Allowed" : "Required")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-    }
-}
-
-private struct SettingsKeyCap: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.caption.weight(.semibold).monospaced())
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
     }
 }

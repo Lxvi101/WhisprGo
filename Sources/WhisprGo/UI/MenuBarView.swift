@@ -5,13 +5,85 @@ struct MenuBarView: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            StatusHeader(engine: engine)
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 18)
+                .padding(.top, 17)
+                .padding(.bottom, 13)
 
-            VStack(alignment: .leading, spacing: 7) {
-                Text("MODEL")
-                    .font(.caption2.weight(.semibold))
+            DottedRule()
+                .padding(.horizontal, 18)
+
+            VStack(alignment: .leading, spacing: 12) {
+                modelPanel
+
+                ShortcutGuide()
+
+                if case let .downloading(progress) = engine.modelState {
+                    DownloadProgress(progress: progress)
+                }
+
+                if !engine.permissions.isComplete {
+                    SetupNotice(engine: engine)
+                } else if engine.modelState == .needsAPIKey {
+                    APIKeyNotice(engine: engine)
+                }
+
+                dictationButton
+
+                if let latency = engine.lastLatency {
+                    Text("Last response  \(latency.formatted(.number.precision(.fractionLength(2))))s")
+                        .font(.caption2.monospacedDigit())
+                        .tracking(0.35)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .padding(16)
+
+            footer
+                .padding(.horizontal, 18)
+                .padding(.vertical, 13)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.09))
+                        .frame(height: 1)
+                }
+        }
+        .frame(width: 360)
+        .onAppear {
+            engine.refreshPermissions()
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 13) {
+            BrandWaveform()
+                .frame(width: 72, height: 40)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("WhisprGo")
+                    .font(.system(size: 18, weight: .medium))
+                Text(engine.stateTitle)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+            DottedActivityMark(engine: engine)
+        }
+    }
+
+    private var modelPanel: some View {
+        MinimalPanel {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    DottedSectionLabel("Model")
+                    Spacer()
+                    if engine.selectedModel.recommended {
+                        MinimalBadge("Default")
+                    }
+                }
 
                 Picker("Model", selection: modelBinding) {
                     Section("On device") {
@@ -35,72 +107,51 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
 
-            Text("Hold fn for push-to-talk · fn + shift toggles")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if case let .downloading(progress) = engine.modelState {
-                VStack(alignment: .leading, spacing: 5) {
-                    ProgressView(value: progress)
-                    Text("Downloading once for private, on-device dictation")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if !engine.permissions.isComplete {
-                SetupNotice(engine: engine)
-            } else if engine.modelState == .needsAPIKey {
-                APIKeyNotice()
-            }
-
-            Button(action: engine.toggleDictation) {
-                HStack {
-                    Image(systemName: engine.activity == .recording ? "stop.fill" : "waveform")
-                    Text(engine.activity == .recording ? "Stop and Type" : "Start Dictating")
-                    Spacer()
-                    ShortcutBadge()
-                }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!engine.canToggle)
-
-            if let latency = engine.lastLatency {
-                Text("Last response: \(latency.formatted(.number.precision(.fractionLength(2))))s")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-
-            Divider()
-
-            HStack {
-                Button {
-                    SettingsWindowController.shared.show(engine: engine)
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(.plain)
-
+    private var dictationButton: some View {
+        Button(action: engine.toggleDictation) {
+            HStack(spacing: 10) {
+                ActionDot(isRecording: engine.activity == .recording)
+                Text(engine.activity == .recording ? "Stop and Type" : "Start Dictating")
+                    .font(.callout.weight(.semibold))
                 Spacer()
-
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                MinimalKeyCap("fn", inverted: true)
+                Text("+")
+                    .font(.caption)
+                    .opacity(0.55)
+                MinimalKeyCap("⇧", inverted: true)
             }
-            .font(.callout)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
-        .padding(16)
-        .frame(width: 330)
-        .onAppear {
-            engine.refreshPermissions()
+        .buttonStyle(MonochromePrimaryButtonStyle())
+        .disabled(!engine.canToggle)
+        .opacity(engine.canToggle ? 1 : 0.42)
+    }
+
+    private var footer: some View {
+        HStack {
+            Button {
+                SettingsWindowController.shared.show(engine: engine)
+            } label: {
+                HStack(spacing: 7) {
+                    DotMenuGlyph()
+                    Text("Settings")
+                }
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button("Quit") {
+                NSApplication.shared.terminate(nil)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
+        .font(.callout)
     }
 
     private var modelBinding: Binding<String> {
@@ -111,36 +162,109 @@ struct MenuBarView: View {
     }
 }
 
-private struct StatusHeader: View {
+private struct DottedActivityMark: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(statusColor.opacity(0.16))
-                    .frame(width: 42, height: 42)
-                Image(systemName: engine.menuBarSymbol)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(statusColor)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(engine.stateTitle)
-                    .font(.headline)
-                Text(engine.stateDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .fill(Color.primary.opacity(opacity(for: index)))
+                    .frame(width: diameter(for: index), height: diameter(for: index))
             }
         }
+        .frame(width: 30, height: 20)
+        .accessibilityHidden(true)
     }
 
-    private var statusColor: Color {
-        if engine.activity == .recording { return .red }
-        if engine.activity == .transcribing { return .blue }
-        if engine.permissions.isComplete && engine.modelState == .ready { return .green }
-        return .orange
+    private func opacity(for index: Int) -> Double {
+        if engine.activity == .recording { return index == 1 ? 1 : 0.55 }
+        if engine.activity == .transcribing { return index == 2 ? 1 : 0.3 }
+        if engine.permissions.isComplete && engine.modelState == .ready {
+            return index == 1 ? 0.72 : 0.2
+        }
+        return index == 0 ? 0.72 : 0.18
+    }
+
+    private func diameter(for index: Int) -> CGFloat {
+        index == 1 ? 6 : 4
+    }
+}
+
+private struct ActionDot: View {
+    let isRecording: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color(nsColor: .textBackgroundColor).opacity(0.5), lineWidth: 1)
+                .frame(width: 15, height: 15)
+            if isRecording {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color(nsColor: .textBackgroundColor))
+                    .frame(width: 6, height: 6)
+            } else {
+                Circle()
+                    .fill(Color(nsColor: .textBackgroundColor))
+                    .frame(width: 5, height: 5)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct DotMenuGlyph: View {
+    var body: some View {
+        HStack(spacing: 2.5) {
+            Circle().frame(width: 3, height: 3)
+            Circle().frame(width: 5, height: 5)
+            Circle().frame(width: 3, height: 3)
+        }
+        .frame(width: 17)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ShortcutGuide: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                MinimalKeyCap("fn")
+                Text("push to talk")
+            }
+            Spacer()
+            HStack(spacing: 5) {
+                MinimalKeyCap("fn")
+                Text("+").foregroundStyle(.tertiary)
+                MinimalKeyCap("⇧")
+                Text("toggle")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DownloadProgress: View {
+    let progress: Double
+
+    var body: some View {
+        MinimalPanel {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    DottedSectionLabel("Downloading")
+                    Spacer()
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption.monospacedDigit())
+                }
+                ProgressView(value: progress)
+                    .tint(.primary)
+                Text("One-time download for private, on-device dictation")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -148,67 +272,43 @@ private struct SetupNotice: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Label("Two one-time permissions are needed", systemImage: "lock.shield")
-                .font(.callout.weight(.semibold))
-            HStack {
-                Button("Allow") {
-                    engine.requestPermissions()
+        MinimalPanel {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    DottedSectionLabel("Permissions")
+                    Spacer()
+                    MinimalBadge("Required", filled: true)
                 }
-                Button("Accessibility Settings") {
-                    engine.openAccessibilitySettings()
+                Text("Microphone and Accessibility access are needed once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Allow") {
+                        engine.requestPermissions()
+                    }
+                    Button("Open Settings") {
+                        engine.openAccessibilitySettings()
+                    }
                 }
             }
         }
-        .padding(11)
-        .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
 private struct APIKeyNotice: View {
+    @ObservedObject var engine: DictationEngine
+
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "key.fill")
-                .foregroundStyle(.orange)
-            Text("This cloud model needs an OpenAI API key.")
-                .font(.caption)
-            Spacer()
-            Button {
-                SettingsWindowController.shared.show(engine: .shared)
-            } label: {
-                Text("Add Key")
+        MinimalPanel {
+            HStack(spacing: 10) {
+                DotSelectionIndicator(isSelected: false)
+                Text("This model needs an OpenAI API key.")
+                    .font(.caption)
+                Spacer()
+                Button("Add Key") {
+                    SettingsWindowController.shared.show(engine: engine)
+                }
             }
         }
-        .padding(11)
-        .background(.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-private struct ShortcutBadge: View {
-    var body: some View {
-        HStack(spacing: 4) {
-            KeyCap("fn")
-            Text("+")
-                .foregroundStyle(.secondary)
-            KeyCap("⇧")
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Function plus Shift")
-    }
-}
-
-private struct KeyCap: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold).monospaced())
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
     }
 }

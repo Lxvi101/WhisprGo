@@ -146,13 +146,19 @@ private final class WaveformOverlayView: NSView {
         0.96, 0.84, 0.68, 0.50, 0.35,
     ]
 
-    private let barsContainer = CALayer()
-    private let bars: [CALayer]
+    private struct MeterDot {
+        let layer: CALayer
+        let envelope: CGFloat
+        let threshold: CGFloat
+    }
+
+    private let dotsContainer = CALayer()
+    private var dots: [MeterDot] = []
     private let spinner = CAShapeLayer()
     private let errorMark = CATextLayer()
+    private var lastRenderedLevel: Float = -1
 
     override init(frame frameRect: NSRect) {
-        bars = Self.envelope.map { _ in CALayer() }
         super.init(frame: frameRect)
         configureLayers()
     }
@@ -167,25 +173,25 @@ private final class WaveformOverlayView: NSView {
     func setState(_ state: RecordingOverlay.State) {
         switch state {
         case .hidden:
-            barsContainer.isHidden = true
+            dotsContainer.isHidden = true
             spinner.isHidden = true
             errorMark.isHidden = true
             spinner.removeAnimation(forKey: "spin")
 
         case .recording:
-            barsContainer.isHidden = false
+            dotsContainer.isHidden = false
             spinner.isHidden = true
             errorMark.isHidden = true
             spinner.removeAnimation(forKey: "spin")
 
         case .transcribing:
-            barsContainer.isHidden = true
+            dotsContainer.isHidden = true
             spinner.isHidden = false
             errorMark.isHidden = true
             startSpinner()
 
         case .error:
-            barsContainer.isHidden = true
+            dotsContainer.isHidden = true
             spinner.isHidden = true
             errorMark.isHidden = false
             spinner.removeAnimation(forKey: "spin")
@@ -193,12 +199,17 @@ private final class WaveformOverlayView: NSView {
     }
 
     func update(level: Float) {
+        guard abs(level - lastRenderedLevel) > 0.002 else { return }
+        lastRenderedLevel = level
         let amplitude = CGFloat(max(0.06, min(1, level)))
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (index, bar) in bars.enumerated() {
-            let scale = max(0.16, amplitude * Self.envelope[index])
-            bar.setAffineTransform(CGAffineTransform(scaleX: 1, y: scale))
+        for dot in dots {
+            let energy = amplitude * dot.envelope
+            let visibility = max(0.1, min(1, (energy * 3.2 - dot.threshold) * 1.55))
+            dot.layer.opacity = Float(visibility)
+            let scale = 0.76 + visibility * 0.24
+            dot.layer.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
         }
         CATransaction.commit()
     }
@@ -213,28 +224,32 @@ private final class WaveformOverlayView: NSView {
         root.cornerCurve = .continuous
         root.masksToBounds = true
 
-        let barWidth: CGFloat = 2.5
-        let barHeight: CGFloat = 21
-        let spacing: CGFloat = 2.25
-        let totalWidth = CGFloat(bars.count) * barWidth + CGFloat(bars.count - 1) * spacing
-        barsContainer.frame = CGRect(
-            x: (bounds.width - totalWidth) / 2,
-            y: (bounds.height - barHeight) / 2,
-            width: totalWidth,
-            height: barHeight
-        )
-        root.addSublayer(barsContainer)
+        let columnSpacing: CGFloat = 5.4
+        let rowSpacing: CGFloat = 4.7
+        let totalWidth = CGFloat(Self.envelope.count - 1) * columnSpacing
+        dotsContainer.frame = bounds
+        root.addSublayer(dotsContainer)
 
-        for (index, bar) in bars.enumerated() {
-            bar.bounds = CGRect(x: 0, y: 0, width: barWidth, height: barHeight)
-            bar.position = CGPoint(
-                x: barWidth / 2 + CGFloat(index) * (barWidth + spacing),
-                y: barHeight / 2
-            )
-            bar.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            bar.backgroundColor = NSColor.white.withAlphaComponent(0.96).cgColor
-            bar.cornerRadius = barWidth / 2
-            barsContainer.addSublayer(bar)
+        for (columnIndex, envelope) in Self.envelope.enumerated() {
+            for row in -2...2 {
+                let rowDistance = CGFloat(abs(row))
+                let diameter = max(2.1, 2.55 + envelope * 0.65 - rowDistance * 0.12)
+                let dotLayer = CALayer()
+                dotLayer.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+                dotLayer.position = CGPoint(
+                    x: bounds.midX - totalWidth / 2 + CGFloat(columnIndex) * columnSpacing,
+                    y: bounds.midY + CGFloat(row) * rowSpacing
+                )
+                dotLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+                dotLayer.backgroundColor = NSColor.white.withAlphaComponent(0.98).cgColor
+                dotLayer.cornerRadius = diameter / 2
+                dotsContainer.addSublayer(dotLayer)
+                dots.append(MeterDot(
+                    layer: dotLayer,
+                    envelope: envelope,
+                    threshold: rowDistance * 0.36
+                ))
+            }
         }
 
         let spinnerFrame = CGRect(x: bounds.midX - 9, y: bounds.midY - 9, width: 18, height: 18)
@@ -255,7 +270,7 @@ private final class WaveformOverlayView: NSView {
         errorMark.alignmentMode = .center
         errorMark.font = NSFont.systemFont(ofSize: 17, weight: .bold)
         errorMark.fontSize = 17
-        errorMark.foregroundColor = NSColor.systemYellow.cgColor
+        errorMark.foregroundColor = NSColor.white.cgColor
         errorMark.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         root.addSublayer(errorMark)
 

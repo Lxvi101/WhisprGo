@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Assets/WhisprGoLogo.svg" width="520" alt="WhisprGo">
+  <img src="Assets/WhisprGo.svg" width="520" alt="WhisprGo">
 </p>
 
 WhisprGo is a low-latency macOS dictation engine that lives in the menu bar. Hold **fn** for push-to-talk, then release it to type. Press **fn + shift** once to start hands-free listening and press the chord again to stop and type.
