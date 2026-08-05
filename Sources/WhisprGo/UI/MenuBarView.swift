@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @ObservedObject var engine: DictationEngine
+    @ObservedObject var updates: UpdateChecker
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,6 +16,10 @@ struct MenuBarView: View {
                 .padding(.horizontal, 18)
 
             VStack(alignment: .leading, spacing: 12) {
+                if let update = updates.availableUpdate {
+                    UpdateAvailablePanel(update: update)
+                }
+
                 modePanel
 
                 modelPanel
@@ -230,6 +235,45 @@ struct MenuBarView: View {
             get: { engine.dictationMode },
             set: { engine.setDictationMode($0) }
         )
+    }
+}
+
+private struct UpdateAvailablePanel: View {
+    let update: AppUpdate
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.open(update.downloadURL)
+        } label: {
+            MinimalPanel {
+                HStack(spacing: 11) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.14))
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
+                    .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("WhisprGo \(update.version) is available")
+                            .font(.callout.weight(.semibold))
+                        Text("Download the latest release")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Open the WhisprGo \(update.version) download")
+        .accessibilityLabel("Download WhisprGo \(update.version)")
     }
 }
 

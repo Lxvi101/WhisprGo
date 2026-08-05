@@ -5,6 +5,34 @@ import XCTest
 @testable import WhisprGo
 
 final class WhisprGoTests: XCTestCase {
+    func testAppVersionComparesGitHubReleaseTagsNumerically() throws {
+        XCTAssertLessThan(try XCTUnwrap(AppVersion("v1.9.9")), try XCTUnwrap(AppVersion("1.10.0")))
+        XCTAssertEqual(try XCTUnwrap(AppVersion("1.0")), try XCTUnwrap(AppVersion("v1.0.0")))
+        XCTAssertNil(AppVersion("release-one"))
+    }
+
+    func testGitHubReleaseUpdateSelectsDMGOnlyForNewerVersion() throws {
+        let data = Data(#"""
+        {
+            "tag_name":"v1.1.0",
+            "html_url":"https://github.com/Lxvi101/WhisprGo/releases/tag/v1.1.0",
+            "assets":[
+                {"name":"WhisprGo-1.1.0.zip","browser_download_url":"https://example.com/app.zip"},
+                {"name":"WhisprGo-1.1.0.dmg","browser_download_url":"https://example.com/app.dmg"}
+            ]
+        }
+        """#.utf8)
+
+        let update = try XCTUnwrap(
+            GitHubReleaseUpdateParser.availableUpdate(from: data, currentVersion: "1.0.0")
+        )
+        XCTAssertEqual(update.version, "1.1.0")
+        XCTAssertEqual(update.downloadURL.absoluteString, "https://example.com/app.dmg")
+        XCTAssertNil(
+            try GitHubReleaseUpdateParser.availableUpdate(from: data, currentVersion: "1.1.0")
+        )
+    }
+
     func testModelCatalogHasUniqueIDsAndValidDefault() {
         XCTAssertEqual(Set(ModelCatalog.all.map(\.id)).count, ModelCatalog.all.count)
         XCTAssertEqual(ModelCatalog.model(id: ModelCatalog.defaultModelID).id, "local.parakeet.v3")
