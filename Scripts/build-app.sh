@@ -19,5 +19,12 @@ cp "$PROJECT_DIR/Assets/WhisprGo.svg" "$CONTENTS_DIR/Resources/WhisprGo.svg"
 cp "$PROJECT_DIR/Packaging/WaveformMark.png" "$CONTENTS_DIR/Resources/WaveformMark.png"
 cp "$PROJECT_DIR/Packaging/MenuBarIconTemplate.png" "$CONTENTS_DIR/Resources/MenuBarIconTemplate.png"
 
+# Keep dependency resource bundles inside the conventional signed Resources
+# directory. Gemma carries its own tokenizer configuration; the bundled GPT-2
+# and T5 files remain available for the transcription stack's fallbacks.
+for RESOURCE_BUNDLE in "$BIN_DIR"/*.bundle(N); do
+    ditto "$RESOURCE_BUNDLE" "$CONTENTS_DIR/Resources/${RESOURCE_BUNDLE:t}"
+done
+
 codesign --force --deep --sign - "$APP_DIR"
 echo "$APP_DIR"

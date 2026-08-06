@@ -1,15 +1,20 @@
-# WhisprGo 1.0.0
+# WhisprGo 1.1.0
 
-WhisprGo turns the fn key into near-instant, system-wide dictation on macOS.
+WhisprGo 1.1 adds configurable global shortcuts and an optional on-device Pro cleanup beta.
 
-The default NVIDIA Parakeet model runs privately on Apple silicon and automatically recognizes 25 European languages. Hold **fn** to speak and release to type, or press **fn + shift** to start and stop hands-free dictation. Local Whisper models and OpenAI transcription models are available from Settings.
+## What’s new
 
-This first public release also includes Mac-microphone AirPods mode, explicit always-active input, automatic model downloads and removal, the low-overhead recording overlay, and the new WhisprGo launch animation.
+- Record custom shortcuts for push-to-talk, hands-free dictation, Fast/Pro switching, Pro profile cycling, and paste-last.
+- Shortcut changes apply immediately, persist across launches, reject conflicts, and can be restored to the familiar defaults.
+- Pro cleanup continues to use GPT-5.6 Luna by default.
+- The optional **On Device (Beta)** provider downloads a 4-bit Gemma 4 E2B MLX model and keeps cleanup text and nearby context on the Mac.
+- Clear confirmation warns that the beta needs about 4.6 GB of storage and roughly 5–7 GB of unified memory while loaded.
+- Gemma stays resident throughout local Pro Mode and unloads after five minutes away from it.
 
 ## Install
 
-1. Download `WhisprGo-1.0.0-macOS.zip`.
-2. Unzip it and move **WhisprGo.app** to Applications.
+1. Download `WhisprGo-1.1.0.dmg`.
+2. Open the disk image and drag **WhisprGo** to **Applications**.
 3. Control-click the app, choose **Open**, and confirm.
 4. Allow Microphone and Accessibility access when prompted.
 

@@ -48,6 +48,9 @@ final class DictationEngine: ObservableObject {
     @Published private(set) var dictationMode: DictationMode
     @Published private(set) var proContextEnabled: Bool
     @Published private(set) var lastContextSummary: String?
+    @Published private(set) var proCleanupProvider: ProCleanupProvider
+    @Published private(set) var localProModelState: LocalProModelState
+    @Published private(set) var hotkeyConfiguration: HotkeyConfiguration
 
     @Published var selectedModelID: String {
         didSet {
@@ -71,11 +74,13 @@ final class DictationEngine: ObservableObject {
     private static let preferBuiltInMicrophoneKey = "preferBuiltInMicrophone"
     private static let dictationModeKey = "dictationMode"
     private static let proContextEnabledKey = "proContextEnabled"
+    private static let proCleanupProviderKey = "proCleanupProvider"
     private static let defaultModelVersionKey = "defaultModelVersion"
     private static let currentDefaultModelVersion = 2
 
     private let runtime = TranscriptionRuntime()
-    private let proProcessor = ProTranscriptionProcessor()
+    private let localProRuntime: LocalProModelRuntime
+    private let proProcessor: ProTranscriptionProcessor
     private let capture: AudioCapture
     private let hotkey = HotkeyMonitor()
     private let overlay: RecordingOverlay
@@ -91,6 +96,8 @@ final class DictationEngine: ObservableObject {
     private var lastCompletedTranscript: String?
     private var modelPreparationTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
+    private var localProPreparationTask: Task<Void, Never>?
+    private var localProUnloadTask: Task<Void, Never>?
 
     private init() {
         LegacyMigration.run()
@@ -103,6 +110,17 @@ final class DictationEngine: ObservableObject {
         ) ?? .fast
         proContextEnabled = defaults.object(forKey: Self.proContextEnabledKey) as? Bool
             ?? true
+        proCleanupProvider = ProCleanupProvider(
+            rawValue: defaults.string(forKey: Self.proCleanupProviderKey) ?? ""
+        ) ?? .defaultProvider
+        hotkeyConfiguration = HotkeyConfiguration.load(from: defaults)
+        localProModelState = ModelCache.isDownloaded(LocalProModel.cacheID)
+            ? .downloaded
+            : .notDownloaded
+
+        let localProRuntime = LocalProModelRuntime()
+        self.localProRuntime = localProRuntime
+        proProcessor = ProTranscriptionProcessor(localRuntime: localProRuntime)
 
         let levelMeter = AudioLevelMeter()
         capture = AudioCapture(
@@ -131,7 +149,35 @@ final class DictationEngine: ObservableObject {
     }
 
     var needsOpenAIKey: Bool {
-        !openAIKeyConfigured && (!selectedModel.isLocal || dictationMode == .pro)
+        !openAIKeyConfigured
+            && (!selectedModel.isLocal
+                || (dictationMode == .pro && proCleanupProvider == .openAI))
+    }
+
+    var dictationModeDetail: String {
+        if dictationMode == .pro, proCleanupProvider == .local {
+            return "Gemma 4 E2B removes fillers and false starts on this Mac, using nearby text when enabled."
+        }
+        return dictationMode.detail
+    }
+
+    var isLocalProModelDownloaded: Bool {
+        _ = modelCacheRevision
+        return ModelCache.isDownloaded(LocalProModel.cacheID)
+    }
+
+    var canRemoveLocalProModel: Bool {
+        guard activity == .idle,
+              proCleanupProvider != .local,
+              isLocalProModelDownloaded
+        else { return false }
+
+        switch localProModelState {
+        case .downloading, .loading:
+            return false
+        case .notDownloaded, .downloaded, .ready, .failed:
+            return true
+        }
     }
 
     var canToggle: Bool {
@@ -139,7 +185,10 @@ final class DictationEngine: ObservableObject {
         case .recording:
             return true
         case .idle:
-            return permissions.isComplete && modelState == .ready && !needsOpenAIKey
+            return permissions.isComplete
+                && modelState == .ready
+                && !needsOpenAIKey
+                && !localProModelBlocksDictation
         case .transcribing:
             return false
         }
@@ -150,7 +199,10 @@ final class DictationEngine: ObservableObject {
     }
 
     var canRerunHistory: Bool {
-        activity == .idle && modelState == .ready && !needsOpenAIKey
+        activity == .idle
+            && modelState == .ready
+            && !needsOpenAIKey
+            && !localProModelBlocksDictation
     }
 
     var stateTitle: String {
@@ -166,7 +218,17 @@ final class DictationEngine: ObservableObject {
         case .starting: return "Starting"
         case .downloading: return "Downloading model"
         case .warming: return "Warming model"
-        case .ready: return "Ready"
+        case .ready:
+            if localProModelBlocksDictation {
+                switch localProModelState {
+                case .notDownloaded, .downloading: return "Downloading cleanup model"
+                case .loading: return "Loading cleanup model"
+                case .failed: return "Needs attention"
+                case .downloaded: return "Loading cleanup model"
+                case .ready: break
+                }
+            }
+            return "Ready"
         case .needsAPIKey: return "API key needed"
         case .failed: return "Needs attention"
         }
@@ -177,8 +239,8 @@ final class DictationEngine: ObservableObject {
         switch activity {
         case .recording:
             return recordingMode == .pushToTalk
-                ? "Release fn to type"
-                : "Press fn + shift again to type"
+                ? "Release \(hotkeyConfiguration[.pushToTalk].displayText) to type"
+                : "Press \(hotkeyConfiguration[.toggleDictation].displayText) again to type"
         case .transcribing:
             return "Your audio is becoming text"
         case .idle:
@@ -192,7 +254,22 @@ final class DictationEngine: ObservableObject {
         case let .downloading(progress):
             return "\(Int(progress * 100))% downloaded"
         case .warming: return "Optimizing for this Mac"
-        case .ready: return "Hold fn, or fn + shift to toggle"
+        case .ready:
+            if localProModelBlocksDictation {
+                switch localProModelState {
+                case let .downloading(progress):
+                    return "Gemma 4 E2B is \(Int(progress * 100))% downloaded"
+                case .notDownloaded:
+                    return "Preparing the local Pro cleanup download"
+                case .loading, .downloaded:
+                    return "Loading Gemma 4 E2B with MLX"
+                case let .failed(message):
+                    return message
+                case .ready:
+                    break
+                }
+            }
+            return "Hold \(hotkeyConfiguration[.pushToTalk].displayText), or \(hotkeyConfiguration[.toggleDictation].displayText) to toggle"
         case .needsAPIKey: return "Add your OpenAI key in Settings"
         case let .failed(message): return message
         }
@@ -203,10 +280,15 @@ final class DictationEngine: ObservableObject {
         case .recording: return "waveform.circle.fill"
         case .transcribing: return "ellipsis.circle"
         case .idle:
-            return permissions.isComplete && modelState == .ready
+            return permissions.isComplete && modelState == .ready && !localProModelBlocksDictation
                 ? "waveform.circle"
                 : "exclamationmark.circle"
         }
+    }
+
+    private var localProModelBlocksDictation: Bool {
+        guard dictationMode == .pro, proCleanupProvider == .local else { return false }
+        return localProModelState != .ready
     }
 
     func start() {
@@ -214,6 +296,9 @@ final class DictationEngine: ObservableObject {
         hasStarted = true
         refreshPermissions()
         prepareSelectedModel()
+        if dictationMode == .pro, proCleanupProvider == .local {
+            prepareLocalProModel()
+        }
 
         if !permissions.isComplete {
             requestPermissions()
@@ -223,6 +308,8 @@ final class DictationEngine: ObservableObject {
     func shutdown() {
         modelPreparationTask?.cancel()
         transcriptionTask?.cancel()
+        localProPreparationTask?.cancel()
+        localProUnloadTask?.cancel()
         if activity == .recording {
             _ = capture.stop(keepActive: false)
         }
@@ -230,7 +317,10 @@ final class DictationEngine: ObservableObject {
         capture.shutdown()
         hotkey.stop()
         history.stopPlayback()
-        Task { await runtime.release() }
+        Task {
+            await runtime.release()
+            await localProRuntime.release()
+        }
     }
 
     func refreshPermissions() {
@@ -309,6 +399,7 @@ final class DictationEngine: ObservableObject {
         guard canRerunHistory else { return }
         let insertionTarget = TextInjector.captureTarget()
         let dictationMode = self.dictationMode
+        let proCleanupProvider = self.proCleanupProvider
         let proProfile = profileStore.selectedProfile
         lastError = nil
         activity = .transcribing
@@ -336,7 +427,8 @@ final class DictationEngine: ObservableObject {
                     rawTranscript,
                     mode: dictationMode,
                     context: nil,
-                    profile: proProfile
+                    profile: proProfile,
+                    provider: proCleanupProvider
                 )
                 let transcript = processed.text
                 lastCompletedTranscript = transcript
@@ -367,7 +459,8 @@ final class DictationEngine: ObservableObject {
                     modelName: historyModelName(
                         model,
                         mode: dictationMode,
-                        profile: proProfile
+                        profile: proProfile,
+                        provider: proCleanupProvider
                     ),
                     latency: latency,
                     errorMessage: warning
@@ -403,6 +496,113 @@ final class DictationEngine: ObservableObject {
         dictationMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: Self.dictationModeKey)
         lastError = nil
+
+        if mode == .pro, proCleanupProvider == .local {
+            prepareLocalProModel()
+        } else {
+            scheduleLocalProModelUnload()
+        }
+    }
+
+    func setProCleanupProvider(_ provider: ProCleanupProvider) {
+        guard activity == .idle, proCleanupProvider != provider else { return }
+        proCleanupProvider = provider
+        UserDefaults.standard.set(provider.rawValue, forKey: Self.proCleanupProviderKey)
+        lastError = nil
+
+        if provider == .local {
+            prepareLocalProModel()
+        } else {
+            scheduleLocalProModelUnload()
+        }
+    }
+
+    func prepareLocalProModel() {
+        localProUnloadTask?.cancel()
+        localProUnloadTask = nil
+
+        if localProModelState == .ready { return }
+        if case .downloading = localProModelState { return }
+        if localProModelState == .loading { return }
+
+        let previousPreparation = localProPreparationTask
+        previousPreparation?.cancel()
+        localProModelState = ModelCache.isDownloaded(LocalProModel.cacheID)
+            ? .loading
+            : .downloading(0)
+
+        localProPreparationTask = Task { [weak self] in
+            guard let self else { return }
+            if let previousPreparation {
+                await previousPreparation.value
+            }
+            guard !Task.isCancelled else { return }
+
+            do {
+                try await localProRuntime.prepare { [weak self] progress in
+                    Task { @MainActor in
+                        guard let self, self.localProModelState != .ready else { return }
+                        self.localProModelState = progress < 0.999
+                            ? .downloading(progress)
+                            : .loading
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                localProModelState = .ready
+                modelCacheRevision &+= 1
+                if dictationMode != .pro || proCleanupProvider != .local {
+                    scheduleLocalProModelUnload()
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                localProModelState = .failed(error.localizedDescription)
+                if proCleanupProvider == .local {
+                    lastError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func removeLocalProModelDownload() {
+        guard canRemoveLocalProModel else { return }
+        localProUnloadTask?.cancel()
+        localProUnloadTask = nil
+
+        Task { [weak self] in
+            guard let self else { return }
+            await localProRuntime.release()
+            do {
+                try ModelCache.removeDownload(for: LocalProModel.cacheID)
+                modelCacheRevision &+= 1
+                localProModelState = .notDownloaded
+                lastError = nil
+            } catch {
+                localProModelState = .failed(error.localizedDescription)
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
+    private func scheduleLocalProModelUnload() {
+        localProUnloadTask?.cancel()
+        guard localProModelState == .ready else { return }
+
+        localProUnloadTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: LocalProModel.unloadDelay)
+            } catch {
+                return
+            }
+            guard let self,
+                  self.dictationMode != .pro || self.proCleanupProvider != .local
+            else { return }
+
+            await localProRuntime.release()
+            localProModelState = ModelCache.isDownloaded(LocalProModel.cacheID)
+                ? .downloaded
+                : .notDownloaded
+        }
     }
 
     func setProContextEnabled(_ enabled: Bool) {
@@ -539,6 +739,40 @@ final class DictationEngine: ObservableObject {
         }
     }
 
+    @discardableResult
+    func setHotkey(_ shortcut: HotkeyShortcut, for action: HotkeyAction) -> HotkeyAction? {
+        guard shortcut.validationMessage == nil else { return nil }
+        if let conflict = hotkeyConfiguration.action(
+            conflictingWith: shortcut,
+            excluding: action
+        ) {
+            return conflict
+        }
+        guard hotkeyConfiguration[action] != shortcut else { return nil }
+        hotkeyConfiguration[action] = shortcut
+        hotkeyConfiguration.save()
+        hotkey.update(configuration: hotkeyConfiguration)
+        return nil
+    }
+
+    func resetHotkeys() {
+        guard hotkeyConfiguration != .default else { return }
+        hotkeyConfiguration = .default
+        hotkeyConfiguration.save()
+        hotkey.update(configuration: hotkeyConfiguration)
+    }
+
+    @discardableResult
+    func beginRecordingHotkey() -> Bool {
+        guard activity == .idle else { return false }
+        hotkey.stop()
+        return true
+    }
+
+    func endRecordingHotkey() {
+        startHotkeyIfPossible()
+    }
+
     var microphoneRouteDescription: String {
         capture.activeInputName ?? capture.preferredInputName() ?? "System default microphone"
     }
@@ -546,7 +780,7 @@ final class DictationEngine: ObservableObject {
     private func startHotkeyIfPossible() {
         guard permissions.accessibility else { return }
         do {
-            try hotkey.start { [weak self] event in
+            try hotkey.start(configuration: hotkeyConfiguration) { [weak self] event in
                 self?.handleHotkey(event)
             }
         } catch {
@@ -643,7 +877,15 @@ final class DictationEngine: ObservableObject {
             guard activity == .idle else { return }
             let nextMode: DictationMode = dictationMode == .fast ? .pro : .fast
             setDictationMode(nextMode)
-            let suffix = nextMode == .pro && !openAIKeyConfigured ? " · Key needed" : ""
+            let suffix: String
+            if nextMode == .pro, proCleanupProvider == .local,
+               localProModelState != .ready {
+                suffix = " · Loading Gemma"
+            } else if nextMode == .pro, needsOpenAIKey {
+                suffix = " · Key needed"
+            } else {
+                suffix = ""
+            }
             modeBadge.show("\(nextMode.title) Mode\(suffix)")
 
         case .cycleProfile:
@@ -712,6 +954,7 @@ final class DictationEngine: ObservableObject {
         recordingContext = nil
         let model = selectedModel
         let dictationMode = self.dictationMode
+        let proCleanupProvider = self.proCleanupProvider
         let proProfile = profileStore.selectedProfile
 
         if let integrityIssue = recording.integrityIssue {
@@ -747,7 +990,8 @@ final class DictationEngine: ObservableObject {
                     rawTranscript,
                     mode: dictationMode,
                     context: context,
-                    profile: proProfile
+                    profile: proProfile,
+                    provider: proCleanupProvider
                 )
                 let transcript = processed.text
                 lastCompletedTranscript = transcript
@@ -785,7 +1029,8 @@ final class DictationEngine: ObservableObject {
                     modelName: historyModelName(
                         model,
                         mode: dictationMode,
-                        profile: proProfile
+                        profile: proProfile,
+                        provider: proCleanupProvider
                     ),
                     duration: recording.duration,
                     latency: latency,
@@ -815,7 +1060,8 @@ final class DictationEngine: ObservableObject {
         _ rawTranscript: String,
         mode: DictationMode,
         context: AccessibilityContextSnapshot?,
-        profile: ProProfile
+        profile: ProProfile,
+        provider: ProCleanupProvider
     ) async -> (text: String, warning: String?) {
         guard mode == .pro else { return (rawTranscript, nil) }
 
@@ -823,7 +1069,8 @@ final class DictationEngine: ObservableObject {
             let polished = try await proProcessor.polish(
                 rawTranscript,
                 context: context,
-                profilePrompt: profile.prompt
+                profilePrompt: profile.prompt,
+                provider: provider
             )
             return (polished, nil)
         } catch {
@@ -837,8 +1084,11 @@ final class DictationEngine: ObservableObject {
     private func historyModelName(
         _ model: TranscriptionModel,
         mode: DictationMode,
-        profile: ProProfile
+        profile: ProProfile,
+        provider: ProCleanupProvider
     ) -> String {
-        mode == .pro ? "\(model.name) · Pro · \(profile.name)" : model.name
+        guard mode == .pro else { return model.name }
+        let cleanup = provider == .local ? "Gemma 4 E2B" : "Luna"
+        return "\(model.name) · Pro \(cleanup) · \(profile.name)"
     }
 }

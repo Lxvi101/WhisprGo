@@ -151,17 +151,19 @@ struct MinimalBadge: View {
 struct MinimalKeyCap: View {
     let text: String
     var inverted = false
+    var compact = false
 
-    init(_ text: String, inverted: Bool = false) {
+    init(_ text: String, inverted: Bool = false, compact: Bool = false) {
         self.text = text
         self.inverted = inverted
+        self.compact = compact
     }
 
     var body: some View {
         Text(text)
             .font(.caption2.weight(.semibold).monospaced())
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, compact ? 5 : 6)
+            .padding(.vertical, compact ? 2 : 3)
             .background(
                 inverted
                     ? Color(nsColor: .textBackgroundColor).opacity(0.15)

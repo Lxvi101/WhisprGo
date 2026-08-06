@@ -29,7 +29,7 @@ struct SettingsView: View {
                 .tabItem { Label("Models", systemImage: "circle.grid.3x3") }
                 .tag(SettingsTab.models)
 
-            ProfileSettingsPane()
+            ProfileSettingsPane(engine: engine)
                 .tabItem { Label("Profiles", systemImage: "text.badge.star") }
                 .tag(SettingsTab.profiles)
 
@@ -473,6 +473,10 @@ private enum HistoryLabels {
 
 private struct GeneralSettingsPane: View {
     @ObservedObject var engine: DictationEngine
+    @State private var isConfirmingLocalCleanup = false
+    @State private var isConfirmingLocalRemoval = false
+    @State private var recordingHotkey: HotkeyAction?
+    @State private var hotkeyError: String?
 
     var body: some View {
         SettingsPaneContainer(
@@ -495,7 +499,7 @@ private struct GeneralSettingsPane: View {
                     .pickerStyle(.segmented)
                     .disabled(engine.activity != .idle)
 
-                    Text(engine.dictationMode.detail)
+                    Text(engine.dictationModeDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -529,46 +533,121 @@ private struct GeneralSettingsPane: View {
                 }
 
                 Section {
-                    LabeledContent("Push to talk") {
-                        HStack(spacing: 7) {
-                            MinimalKeyCap("fn")
-                            Text("Hold")
+                    Picker(
+                        "Cleanup provider",
+                        selection: Binding(
+                            get: { engine.proCleanupProvider },
+                            set: { provider in
+                                if provider == .local,
+                                   engine.proCleanupProvider != .local {
+                                    isConfirmingLocalCleanup = true
+                                } else {
+                                    engine.setProCleanupProvider(provider)
+                                }
+                            }
+                        )
+                    ) {
+                        ForEach(ProCleanupProvider.allCases) { provider in
+                            Text(provider.title).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(engine.activity != .idle)
+
+                    Text(engine.proCleanupProvider.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if engine.proCleanupProvider == .local {
+                        LabeledContent(LocalProModel.displayName) {
+                            Text(localModelStatus)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                    }
 
-                    LabeledContent("Hands-free toggle") {
-                        HStack(spacing: 6) {
-                            MinimalKeyCap("fn")
-                            Text("+").foregroundStyle(.tertiary)
-                            MinimalKeyCap("⇧")
+                        if case let .downloading(progress) = engine.localProModelState {
+                            ProgressView(value: progress)
+                                .accessibilityLabel("Downloading local cleanup model")
                         }
-                    }
 
-                    LabeledContent("Switch Fast / Pro") {
-                        HStack(spacing: 6) {
-                            MinimalKeyCap("R⇧")
-                            Text("Tap")
+                        Label(
+                            "Uses \(LocalProModel.diskUsageLabel) of storage and \(LocalProModel.memoryUsageLabel) while loaded.",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+
+                        Text("WhisprGo keeps it loaded throughout Pro Mode. After you leave Pro Mode, it unloads after \(LocalProModel.unloadDelayLabel) of inactivity.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        HStack {
+                            Link("View MLX model", destination: LocalProModel.mlxSourceURL)
+                            Link("Original GGUF", destination: LocalProModel.sourceURL)
+
+                            if case .failed = engine.localProModelState {
+                                Button("Try Again") {
+                                    engine.prepareLocalProModel()
+                                }
+                            }
+                        }
+                    } else if engine.isLocalProModelDownloaded {
+                        HStack {
+                            Text("Local Gemma download")
+                            Spacer()
+                            Text(LocalProModel.diskUsageLabel)
+                                .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
+                            Button("Remove Download", role: .destructive) {
+                                isConfirmingLocalRemoval = true
+                            }
+                            .disabled(!engine.canRemoveLocalProModel)
                         }
                     }
+                } header: {
+                    DottedSectionLabel("Pro Cleanup")
+                }
 
-                    LabeledContent("Next Pro profile") {
-                        HStack(spacing: 6) {
-                            MinimalKeyCap("R⌃")
-                            Text("+").foregroundStyle(.tertiary)
-                            MinimalKeyCap("R⇧")
-                        }
+                Section {
+                    ForEach(HotkeyAction.allCases) { action in
+                        HotkeyRecorderRow(
+                            action: action,
+                            shortcut: engine.hotkeyConfiguration[action],
+                            isRecording: recordingHotkey == action,
+                            onStart: { beginRecording(action) },
+                            onCancel: cancelHotkeyRecording,
+                            onCapture: { save($0, for: action) }
+                        )
+                        .disabled(engine.activity != .idle)
                     }
 
-                    LabeledContent("Paste last dictation") {
-                        HStack(spacing: 5) {
-                            MinimalKeyCap("⌘")
-                            MinimalKeyCap("⌥")
-                            MinimalKeyCap("V")
-                        }
+                    if let hotkeyError {
+                        Label(hotkeyError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
 
+                    HStack {
+                        Text("Changes take effect immediately.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Restore Defaults") {
+                            cancelHotkeyRecording()
+                            engine.resetHotkeys()
+                            hotkeyError = nil
+                        }
+                        .disabled(
+                            engine.hotkeyConfiguration == .default || engine.activity != .idle
+                        )
+                    }
+                } header: {
+                    DottedSectionLabel("Shortcuts")
+                } footer: {
+                    Text("Click a shortcut, then press the new combination. Press Escape to cancel. Ordinary typing keys need a modifier.")
+                }
+
+                Section {
                     Toggle("Add a space after each dictation", isOn: $engine.appendTrailingSpace)
                 } header: {
                     DottedSectionLabel("Dictation")
@@ -654,10 +733,72 @@ private struct GeneralSettingsPane: View {
             }
             .formStyle(.grouped)
         }
+        .onDisappear {
+            if recordingHotkey != nil {
+                cancelHotkeyRecording()
+            }
+        }
+        .alert("Use local Pro cleanup beta?", isPresented: $isConfirmingLocalCleanup) {
+            Button("Cancel", role: .cancel) {}
+            Button(engine.isLocalProModelDownloaded ? "Use Beta" : "Download Beta & Use") {
+                engine.setProCleanupProvider(.local)
+            }
+        } message: {
+            Text("This beta uses Gemma 4 E2B. It needs \(LocalProModel.diskUsageLabel) of storage and may use \(LocalProModel.memoryUsageLabel) while Pro Mode is active. The model and cleanup text stay on this Mac.")
+        }
+        .alert("Remove local cleanup model?", isPresented: $isConfirmingLocalRemoval) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove Download", role: .destructive) {
+                engine.removeLocalProModelDownload()
+            }
+        } message: {
+            Text("This frees \(LocalProModel.diskUsageLabel) of storage. Choosing On Device (Beta) again downloads the model automatically.")
+        }
+    }
+
+    private func beginRecording(_ action: HotkeyAction) {
+        if recordingHotkey == nil {
+            guard engine.beginRecordingHotkey() else { return }
+        }
+        recordingHotkey = action
+        hotkeyError = nil
+    }
+
+    private func cancelHotkeyRecording() {
+        guard recordingHotkey != nil else { return }
+        recordingHotkey = nil
+        hotkeyError = nil
+        engine.endRecordingHotkey()
+    }
+
+    private func save(_ shortcut: HotkeyShortcut, for action: HotkeyAction) {
+        if let validationMessage = shortcut.validationMessage {
+            hotkeyError = validationMessage
+            return
+        }
+        if let conflict = engine.setHotkey(shortcut, for: action) {
+            hotkeyError = "That shortcut is already used for \(conflict.title.lowercased())."
+            return
+        }
+        recordingHotkey = nil
+        hotkeyError = nil
+        engine.endRecordingHotkey()
+    }
+
+    private var localModelStatus: String {
+        switch engine.localProModelState {
+        case .notDownloaded: return "Waiting to download"
+        case let .downloading(progress): return "Downloading \(Int(progress * 100))%"
+        case .loading: return "Loading with MLX"
+        case .ready: return "Loaded for Pro Mode"
+        case .downloaded: return "Downloaded · unloaded"
+        case .failed: return "Needs attention"
+        }
     }
 }
 
 private struct ProfileSettingsPane: View {
+    @ObservedObject var engine: DictationEngine
     @ObservedObject private var store = ProProfileStore.shared
     @State private var draftName = ""
     @State private var draftPrompt = ""
@@ -786,11 +927,10 @@ private struct ProfileSettingsPane: View {
                     Text("Cycle while in Pro Mode")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    HStack(spacing: 5) {
-                        MinimalKeyCap("R⌃")
-                        Text("+").font(.caption2).foregroundStyle(.tertiary)
-                        MinimalKeyCap("R⇧")
-                    }
+                    HotkeyCapsView(
+                        shortcut: engine.hotkeyConfiguration[.cycleProfile],
+                        compact: true
+                    )
                 }
 
                 Spacer()
@@ -1060,7 +1200,7 @@ private struct ProviderSettingsPane: View {
                 }
 
                 Section {
-                    Text("The key is stored in macOS Keychain. Fast Mode with a local model sends nothing to OpenAI. Pro Mode sends the raw transcript and, when enabled, bounded Accessibility text to GPT-5.6 Luna with API storage disabled. WhisprGo never captures screenshots.")
+                    Text("The key is stored in macOS Keychain. Fast Mode with a local model sends nothing to OpenAI. Pro Mode sends the raw transcript and, when enabled, bounded Accessibility text to GPT-5.6 Luna only when OpenAI is selected as the cleanup provider. The On Device beta keeps both on this Mac. WhisprGo never captures screenshots.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } header: {

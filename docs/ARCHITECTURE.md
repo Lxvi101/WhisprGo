@@ -3,13 +3,13 @@
 WhisprGo separates the latency-critical capture path from work that can block, allocate, or touch the network.
 
 ```text
-fn hold / fn + shift edge
+configured global shortcut edge
       │
       ▼
-HotkeyMonitor ──► AudioCapture ──► TranscriptionRuntime ──► TextInjector
-                       │                    │
-                       │                    ├─ one Parakeet or Whisper pipeline
-                       │                    └─ one reusable OpenAI client
+HotkeyMonitor ──► AudioCapture ──► TranscriptionRuntime ──► Pro cleanup ──► TextInjector
+                       │                    │                    │
+                       │                    ├─ Parakeet/Whisper  ├─ GPT-5.6 Luna
+                       │                    └─ OpenAI audio      └─ Gemma 4 E2B / MLX
                        ▼
                RecordingOverlay
                (display-synced Core Animation)
@@ -20,16 +20,17 @@ captured buffer ──► HistoryPersistence actor ──► WAV + compact JSON 
 
 ## Lifecycle
 
-1. The app starts as a menu-bar accessory and installs one modifier-only CGEvent tap.
+1. The app starts as a menu-bar accessory and installs one narrow CGEvent tap for modifier changes and configured key edges.
 2. The selected model downloads automatically if needed, then loads and prewarms. Only that local model remains resident.
-3. Holding fn starts push-to-talk after a 40 ms chord-disambiguation window; releasing fn stops. fn + shift is an independent start/stop toggle.
+3. The persisted shortcut configuration maps key or modifier-only chords to five actions. Push-to-talk starts after a 40 ms modifier-chord disambiguation window and stops on release; all other actions fire once per press or tap. Defaults remain fn hold, fn + shift toggle, right Shift mode switching, right Control + right Shift profile cycling, and Command + Option + V for paste-last.
 4. The stop edge snapshots 16 kHz mono Float32 samples. Capture either stays active or releases the graph according to the explicit instant-response setting.
 5. Very short or silent buffers are discarded without inference.
 6. Source and resampled durations are compared; incomplete capture never reaches a speech model.
 7. Local audio goes to FluidAudio/Parakeet or WhisperKit. Cloud audio is encoded as 16-bit WAV and posted to the selected API model.
-8. Text is inserted directly into the focused Accessibility element when supported, with Unicode CGEvents as the compatibility fallback.
-9. After insertion completes, a utility-priority actor encodes the same immutable buffer to WAV and atomically updates a compact manifest. The newest 50 runs are retained.
-10. In always-active mode, an atomic gate discards idle callbacks before any conversion, buffering, or history persistence.
+8. In Pro Mode, the raw transcript and bounded Accessibility context are cleaned by GPT-5.6 Luna by default or the optional 4-bit Gemma 4 E2B MLX beta.
+9. Text is inserted directly into the focused Accessibility element when supported, with Unicode CGEvents as the compatibility fallback.
+10. After insertion completes, a utility-priority actor encodes the same immutable buffer to WAV and atomically updates a compact manifest. The newest 50 runs are retained.
+11. In always-active mode, an atomic gate discards idle callbacks before any conversion, buffering, or history persistence.
 
 ## Memory limits
 
@@ -40,6 +41,7 @@ captured buffer ──► HistoryPersistence actor ──► WAV + compact JSON 
 - Model changes release the existing pipeline before downloading/loading a replacement, avoiding two resident model graphs.
 - Parakeet uses the int8 Core ML encoder and one long-form worker to prevent multi-worker memory spikes.
 - Cloud selection releases the local Core ML pipeline entirely.
+- Local Pro cleanup keeps Gemma resident throughout Pro Mode, then releases its model container and clears the MLX cache after a five-minute grace period. Its download remains isolated and removable.
 - Every new model download has an isolated storage root, so removal reclaims that model without touching any other cache.
 - History is bounded to 50 16 kHz mono WAV files. It uses a compact JSON manifest rather than a resident database, and no audio is decoded until the user explicitly replays or re-runs it.
 - There is no WebView, analytics SDK, or background sidecar.

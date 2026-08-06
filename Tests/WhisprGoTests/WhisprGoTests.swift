@@ -46,6 +46,30 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertTrue(DictationMode.pro.detail.contains("GPT-5.6 Luna"))
     }
 
+    func testProCleanupProvidersIncludeCloudAndLocalMLX() {
+        XCTAssertEqual(ProCleanupProvider.allCases, [.openAI, .local])
+        XCTAssertEqual(ProCleanupProvider.defaultProvider, .openAI)
+        XCTAssertTrue(ProCleanupProvider.local.title.contains("Beta"))
+        XCTAssertTrue(ProCleanupProvider.local.detail.contains("MLX"))
+        XCTAssertTrue(LocalProModel.repositoryID.contains("E2B-it-UD-MLX-4bit"))
+        XCTAssertEqual(LocalProModel.unloadDelay, .seconds(300))
+    }
+
+    func testProOutputRemovesModelWrappers() {
+        XCTAssertEqual(
+            ProTranscriptionOutput.clean("<think>ignore this</think>\nI took the taxi."),
+            "I took the taxi."
+        )
+        XCTAssertEqual(
+            ProTranscriptionOutput.clean("```text\nI took the taxi.\n```"),
+            "I took the taxi."
+        )
+        XCTAssertEqual(
+            ProTranscriptionOutput.clean("<final>I took the taxi.</final>"),
+            "I took the taxi."
+        )
+    }
+
     func testRightShiftTapTogglesModeButTypingDoesNot() {
         var state = ModeShortcutState()
         XCTAssertNil(state.consume(
@@ -165,6 +189,81 @@ final class WhisprGoTests: XCTestCase {
             keyCode: 9,
             flags: [.maskControl, .maskAlternate]
         ))
+    }
+
+    func testDefaultHotkeysPreserveExistingGestures() {
+        let configuration = HotkeyConfiguration.default
+        XCTAssertEqual(configuration[.pushToTalk].displayComponents, ["fn"])
+        XCTAssertEqual(configuration[.toggleDictation].displayComponents, ["fn", "⇧"])
+        XCTAssertEqual(configuration[.toggleMode].displayComponents, ["R⇧"])
+        XCTAssertEqual(configuration[.cycleProfile].displayComponents, ["R⌃", "R⇧"])
+        XCTAssertEqual(configuration[.pasteLast].displayComponents, ["⌥", "⌘", "V"])
+    }
+
+    func testHotkeyConfigurationPersistsCustomShortcuts() throws {
+        let suiteName = "WhisprGoHotkeyTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var configuration = HotkeyConfiguration.default
+        configuration[.toggleDictation] = .key(2, modifiers: [.control, .command])
+        configuration.save(to: defaults)
+
+        XCTAssertEqual(HotkeyConfiguration.load(from: defaults), configuration)
+    }
+
+    func testHotkeyValidationRejectsBareTypingKeysAndDuplicates() {
+        let bareLetter = HotkeyShortcut.key(0, modifiers: [])
+        XCTAssertNotNil(bareLetter.validationMessage)
+        XCTAssertNil(HotkeyShortcut.key(122, modifiers: []).validationMessage)
+
+        XCTAssertTrue(
+            HotkeyShortcut.modifierChord([.init(.shift)])
+                .conflicts(with: .modifierChord([.init(.shift, side: .right)]))
+        )
+        XCTAssertFalse(
+            HotkeyShortcut.modifierChord([.init(.shift, side: .left)])
+                .conflicts(with: .modifierChord([.init(.shift, side: .right)]))
+        )
+
+        let configuration = HotkeyConfiguration.default
+        XCTAssertEqual(
+            configuration.action(
+                conflictingWith: configuration[.pasteLast],
+                excluding: .toggleDictation
+            ),
+            .pasteLast
+        )
+    }
+
+    func testConfigurableHotkeyMatchingUsesExactModifiersAndPhysicalSides() {
+        let configuration = HotkeyConfiguration.default
+        XCTAssertTrue(HotkeyMonitor.modifierShortcutMatches(
+            configuration: configuration,
+            action: .toggleMode,
+            flags: [.maskShift],
+            pressedModifierKeyCodes: [60]
+        ))
+        XCTAssertFalse(HotkeyMonitor.modifierShortcutMatches(
+            configuration: configuration,
+            action: .toggleMode,
+            flags: [.maskShift],
+            pressedModifierKeyCodes: [56]
+        ))
+        XCTAssertFalse(HotkeyMonitor.modifierShortcutMatches(
+            configuration: configuration,
+            action: .toggleMode,
+            flags: [.maskShift, .maskControl],
+            pressedModifierKeyCodes: [60, 62]
+        ))
+        XCTAssertEqual(
+            HotkeyMonitor.keyShortcutAction(
+                configuration: configuration,
+                keyCode: 9,
+                flags: [.maskCommand, .maskAlternate]
+            ),
+            .pasteLast
+        )
     }
 
     @MainActor

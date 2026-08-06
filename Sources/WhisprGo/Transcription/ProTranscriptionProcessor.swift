@@ -3,12 +3,26 @@ import Foundation
 actor ProTranscriptionProcessor {
     private var client: OpenAITextClient?
     private var clientKey: String?
+    private let localRuntime: LocalProModelRuntime
+
+    init(localRuntime: LocalProModelRuntime) {
+        self.localRuntime = localRuntime
+    }
 
     func polish(
         _ rawTranscript: String,
         context: AccessibilityContextSnapshot?,
-        profilePrompt: String
+        profilePrompt: String,
+        provider: ProCleanupProvider
     ) async throws -> String {
+        if provider == .local {
+            return try await localRuntime.polish(
+                rawTranscript,
+                context: context,
+                profilePrompt: profilePrompt
+            )
+        }
+
         guard let apiKey = KeychainStore.openAIAPIKey(), !apiKey.isEmpty else {
             throw ProTranscriptionError.missingAPIKey
         }
@@ -145,16 +159,37 @@ final class OpenAITextClient {
             let suffix = decoded.id.map { " Response ID: \($0)." } ?? ""
             throw ProTranscriptionError.emptyOutput(suffix)
         }
-        return Self.removingAccidentalFence(from: output)
+        return ProTranscriptionOutput.clean(output)
     }
+}
 
-    private static func removingAccidentalFence(from value: String) -> String {
-        guard value.hasPrefix("```"), value.hasSuffix("```") else { return value }
-        var lines = value.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count >= 2 else { return value }
+enum ProTranscriptionOutput {
+    static func clean(_ value: String) -> String {
+        var output = value.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for closingTag in ["</think>", "</analysis>"] {
+            if output.hasPrefix("<"),
+               let range = output.range(of: closingTag, options: .caseInsensitive) {
+                output = String(output[range.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        if output.hasPrefix("<final>"), output.hasSuffix("</final>") {
+            output.removeFirst("<final>".count)
+            output.removeLast("</final>".count)
+            output = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        guard output.hasPrefix("```"), output.hasSuffix("```") else {
+            return output
+        }
+        var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count >= 2 else { return output }
         lines.removeFirst()
         lines.removeLast()
-        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return lines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

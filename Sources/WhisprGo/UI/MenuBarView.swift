@@ -34,6 +34,12 @@ struct MenuBarView: View {
                     DownloadProgress(progress: progress)
                 }
 
+                if engine.dictationMode == .pro,
+                   engine.proCleanupProvider == .local,
+                   case let .downloading(progress) = engine.localProModelState {
+                    DownloadProgress(progress: progress)
+                }
+
                 if !engine.permissions.isComplete {
                     SetupNotice(engine: engine)
                 } else if engine.needsOpenAIKey {
@@ -73,7 +79,7 @@ struct MenuBarView: View {
                 HStack {
                     DottedSectionLabel("Processing")
                     Spacer()
-                    MinimalBadge(engine.dictationMode == .fast ? "Local path" : "Luna")
+                    MinimalBadge(processingBadge)
                 }
 
                 Picker("Processing mode", selection: modeBinding) {
@@ -85,13 +91,13 @@ struct MenuBarView: View {
                 .pickerStyle(.segmented)
                 .disabled(engine.activity != .idle)
 
-                Text(engine.dictationMode.detail)
+                Text(engine.dictationModeDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if engine.dictationMode == .pro {
-                    ProProfilePicker()
+                    ProProfilePicker(engine: engine)
 
                     HStack(spacing: 7) {
                         Circle()
@@ -109,15 +115,23 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
                 } else {
                     HStack {
-                        Text("Tap Right Shift to switch")
+                        Text("Shortcut to switch modes")
                         Spacer()
-                        MinimalKeyCap("R⇧")
+                        HotkeyCapsView(
+                            shortcut: engine.hotkeyConfiguration[.toggleMode],
+                            compact: true
+                        )
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 }
             }
         }
+    }
+
+    private var processingBadge: String {
+        guard engine.dictationMode == .pro else { return "Local path" }
+        return engine.proCleanupProvider == .local ? "On-device beta" : "Luna"
     }
 
     private var header: some View {
@@ -181,11 +195,10 @@ struct MenuBarView: View {
                 Text(engine.activity == .recording ? "Stop and Type" : "Start Dictating")
                     .font(.callout.weight(.semibold))
                 Spacer()
-                MinimalKeyCap("fn", inverted: true)
-                Text("+")
-                    .font(.caption)
-                    .opacity(0.55)
-                MinimalKeyCap("⇧", inverted: true)
+                HotkeyCapsView(
+                    shortcut: engine.hotkeyConfiguration[.toggleDictation],
+                    inverted: true
+                )
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -385,29 +398,37 @@ private struct ShortcutGuide: View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 HStack(spacing: 6) {
-                    MinimalKeyCap("fn")
+                    HotkeyCapsView(
+                        shortcut: engine.hotkeyConfiguration[.pushToTalk],
+                        compact: true
+                    )
                     Text("push to talk")
                 }
                 Spacer()
                 HStack(spacing: 5) {
-                    MinimalKeyCap("fn")
-                    Text("+").foregroundStyle(.tertiary)
-                    MinimalKeyCap("⇧")
+                    HotkeyCapsView(
+                        shortcut: engine.hotkeyConfiguration[.toggleDictation],
+                        compact: true
+                    )
                     Text("toggle")
                 }
             }
 
             HStack {
                 HStack(spacing: 5) {
-                    MinimalKeyCap("R⇧")
+                    HotkeyCapsView(
+                        shortcut: engine.hotkeyConfiguration[.toggleMode],
+                        compact: true
+                    )
                     Text("mode")
                 }
                 Spacer()
                 Button(action: engine.pasteLastDictation) {
                     HStack(spacing: 5) {
-                        MinimalKeyCap("⌘")
-                        MinimalKeyCap("⌥")
-                        MinimalKeyCap("V")
+                        HotkeyCapsView(
+                            shortcut: engine.hotkeyConfiguration[.pasteLast],
+                            compact: true
+                        )
                         Text("paste last")
                     }
                 }
@@ -421,6 +442,7 @@ private struct ShortcutGuide: View {
 }
 
 private struct ProProfilePicker: View {
+    @ObservedObject var engine: DictationEngine
     @ObservedObject private var store = ProProfileStore.shared
 
     var body: some View {
@@ -436,9 +458,10 @@ private struct ProProfilePicker: View {
             .labelsHidden()
             .pickerStyle(.menu)
 
-            MinimalKeyCap("⌃")
-            Text("+").font(.caption2).foregroundStyle(.tertiary)
-            MinimalKeyCap("R⇧")
+            HotkeyCapsView(
+                shortcut: engine.hotkeyConfiguration[.cycleProfile],
+                compact: true
+            )
         }
     }
 
@@ -507,7 +530,7 @@ private struct APIKeyNotice: View {
             HStack(spacing: 10) {
                 DotSelectionIndicator(isSelected: false)
                 Text(
-                    engine.dictationMode == .pro
+                    engine.dictationMode == .pro && engine.proCleanupProvider == .openAI
                         ? "Pro Mode needs an OpenAI API key."
                         : "This model needs an OpenAI API key."
                 )

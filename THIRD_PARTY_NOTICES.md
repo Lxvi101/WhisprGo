@@ -42,3 +42,24 @@ downloaded in a Core ML conversion maintained by FluidInference. The original
 model is licensed under CC BY 4.0:
 <https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3>. WhisprGo does not
 modify the model weights.
+
+## MLX Swift and MLX Swift LM
+
+On-device Pro cleanup uses Apple's MLX Swift and the MLX Swift LM model
+implementations. The Swift package dependencies include their MIT license texts.
+See <https://github.com/ml-explore/mlx-swift> and
+<https://github.com/ml-explore/mlx-swift-lm>.
+
+## Swift Hugging Face and Swift Transformers
+
+The local cleanup model downloader and tokenizer use Hugging Face's Swift
+packages. Their package distributions include the applicable license texts.
+See <https://github.com/huggingface/swift-huggingface> and
+<https://github.com/huggingface/swift-transformers>.
+
+## Gemma 4 E2B
+
+The optional on-device cleanup model is Unsloth's 4-bit MLX conversion of
+Gemma 4 E2B Instruct. It is downloaded only after the user chooses On Device
+cleanup and accepts the storage and memory warning. Model details and license:
+<https://huggingface.co/unsloth/gemma-4-E2B-it-UD-MLX-4bit>.
