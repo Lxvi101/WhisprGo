@@ -34,6 +34,10 @@ let package = Package(
             url: "https://github.com/huggingface/swift-transformers",
             from: "1.3.0"
         ),
+        .package(
+            url: "https://github.com/sparkle-project/Sparkle",
+            exact: "2.9.2"
+        ),
     ],
     targets: [
         .executableTarget(
@@ -47,8 +51,15 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
-            path: "Sources/WhisprGo"
+            path: "Sources/WhisprGo",
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
+                ]),
+            ]
         ),
         .target(
             name: "AtomicSupport",

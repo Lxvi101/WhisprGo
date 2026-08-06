@@ -44,6 +44,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         StartupAnimationController.shared.show()
         DictationEngine.shared.start()
+        _ = AutomaticUpdater.shared
         UpdateChecker.shared.checkOnLaunch()
     }
 

@@ -16,6 +16,7 @@ WhisprGo is a low-latency macOS dictation engine that lives in the menu bar. By 
 - AirPods mode uses the built-in Mac microphone while leaving headphones in high-quality playback mode.
 - Optional always-active input for the lowest possible shortcut-to-audio latency.
 - Optional launch at login.
+- Signed, in-app updates that download, verify, install, and relaunch automatically.
 - A local history of the latest 50 dictations with audio replay, deletion, and re-run using the current model.
 
 The default is NVIDIA Parakeet TDT 0.6B v3, running locally through Core ML. It automatically detects and transcribes 25 European languages. Select Whisper Tiny for the smallest resident footprint, or an API model to avoid holding a local model in RAM.
@@ -32,9 +33,9 @@ Shortcuts are managed in **Settings → General → Shortcuts**. Click any short
 
 ## Install
 
-Download the latest `WhisprGo-macOS.zip` from [Releases](https://github.com/Lxvi101/WhisprGo/releases/latest), unzip it, and move **WhisprGo.app** to Applications.
+Download the latest DMG from [Releases](https://github.com/Lxvi101/WhisprGo/releases/latest), open it, and drag **WhisprGo** to Applications. This one bridge installation enables signed automatic updates for future releases. WhisprGo then checks in the background, verifies both the signed feed and update archive, and can install and relaunch without sending users back to GitHub.
 
-Version 1.0 is ad-hoc signed while Developer ID distribution is being set up. On first launch, Control-click the app, choose **Open**, then confirm. macOS will ask for Microphone and Accessibility access.
+The Developer ID signature keeps WhisprGo's identity stable across releases, so macOS does not treat every update as a different app. macOS will ask for Microphone and Accessibility access on the first signed installation.
 
 ## Build
 

@@ -9,6 +9,7 @@ BACKGROUND_PATH="$PROJECT_DIR/Packaging/DMGBackground.png"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/Packaging/Info.plist")"
 OUTPUT_PATH="$BUILD_DIR/WhisprGo-$VERSION.dmg"
 VOLUME_NAME="WhisprGo"
+SIGNING_IDENTITY="${WHISPRGO_SIGNING_IDENTITY:-}"
 
 TEMP_DIR="$(mktemp -d /tmp/whisprgo-dmg.XXXXXX)"
 STAGING_DIR="$TEMP_DIR/staging"
@@ -119,5 +120,10 @@ hdiutil convert \
 hdiutil verify "$COMPRESSED_IMAGE" -quiet
 mkdir -p "$BUILD_DIR"
 mv -f "$COMPRESSED_IMAGE" "$OUTPUT_PATH"
+
+if [[ -n "$SIGNING_IDENTITY" && "$SIGNING_IDENTITY" != "-" ]]; then
+    codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$OUTPUT_PATH"
+    codesign --verify --verbose=2 "$OUTPUT_PATH"
+fi
 
 print "$OUTPUT_PATH"

@@ -256,7 +256,7 @@ private struct UpdateAvailablePanel: View {
 
     var body: some View {
         Button {
-            NSWorkspace.shared.open(update.downloadURL)
+            AutomaticUpdater.shared.checkForUpdates()
         } label: {
             MinimalPanel {
                 HStack(spacing: 11) {
@@ -272,7 +272,7 @@ private struct UpdateAvailablePanel: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("WhisprGo \(update.version) is available")
                             .font(.callout.weight(.semibold))
-                        Text("Download the latest release")
+                        Text("Download and install automatically")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -285,8 +285,8 @@ private struct UpdateAvailablePanel: View {
             }
         }
         .buttonStyle(.plain)
-        .help("Open the WhisprGo \(update.version) download")
-        .accessibilityLabel("Download WhisprGo \(update.version)")
+        .help("Install WhisprGo \(update.version)")
+        .accessibilityLabel("Install WhisprGo \(update.version)")
     }
 }
 
