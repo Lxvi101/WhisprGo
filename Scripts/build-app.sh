@@ -61,6 +61,8 @@ fi
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FRAMEWORK"
-codesign "${SIGN_ARGS[@]}" "$APP_DIR"
+codesign "${SIGN_ARGS[@]}" \
+    --entitlements "$PROJECT_DIR/Packaging/WhisprGo.entitlements" \
+    "$APP_DIR"
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 echo "$APP_DIR"

@@ -8,3 +8,5 @@ xcuserdata/
 *.xcarchive
 *.dSYM
 *.zip
+*.p12
+*.pfx

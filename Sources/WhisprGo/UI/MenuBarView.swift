@@ -514,7 +514,11 @@ private struct SetupNotice: View {
                         engine.requestPermissions()
                     }
                     Button("Open Settings") {
-                        engine.openAccessibilitySettings()
+                        if engine.permissions.microphone {
+                            engine.openAccessibilitySettings()
+                        } else {
+                            engine.openMicrophoneSettings()
+                        }
                     }
                 }
             }

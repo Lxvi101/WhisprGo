@@ -377,6 +377,13 @@ final class DictationEngine: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func openMicrophoneSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     func toggleDictation() {
         lastError = nil
         switch activity {

@@ -51,4 +51,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         DictationEngine.shared.shutdown()
     }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        DictationEngine.shared.refreshPermissions()
+    }
 }

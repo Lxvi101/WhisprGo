@@ -710,6 +710,9 @@ private struct GeneralSettingsPane: View {
                         Button("Request Permissions") {
                             engine.requestPermissions()
                         }
+                        Button("Open Microphone") {
+                            engine.openMicrophoneSettings()
+                        }
                         Button("Open Accessibility") {
                             engine.openAccessibilitySettings()
                         }
