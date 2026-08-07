@@ -1,21 +1,18 @@
-# WhisprGo 1.1.0
+# WhisprGo 1.2.2
 
-WhisprGo 1.1 adds configurable global shortcuts and an optional on-device Pro cleanup beta.
+This patch makes automatic paste delivery substantially more reliable across web apps, rich editors, and clipboard managers.
 
-## What’s new
+## More reliable pasting
 
-- Record custom shortcuts for push-to-talk, hands-free dictation, Fast/Pro switching, Pro profile cycling, and paste-last.
-- Shortcut changes apply immediately, persist across launches, reject conflicts, and can be restored to the familiar defaults.
-- Pro cleanup continues to use GPT-5.6 Luna by default.
-- The optional **On Device (Beta)** provider downloads a 4-bit Gemma 4 E2B MLX model and keeps cleanup text and nearby context on the Mac.
-- Clear confirmation warns that the beta needs about 4.6 GB of storage and roughly 5–7 GB of unified memory while loaded.
-- Gemma stays resident throughout local Pro Mode and unloads after five minutes away from it.
+- Sends Command-V as a complete, carefully timed keyboard sequence for editors that ignore instantaneous synthetic shortcuts.
+- Keeps the transcript available long enough for editors that consume the clipboard asynchronously.
+- Removes false paste warnings caused by delayed or incomplete Accessibility values in Chromium, WebKit, and rich-text editors.
+- Preserves every representation of the previous clipboard without overwriting anything copied after dictation.
+- Handles rapid consecutive dictations without losing the clipboard state from before the first paste.
+- Prevents WhisprGo's synthetic Command-V from triggering user-configured global shortcuts.
 
-## Install
+## Latency
 
-1. Download `WhisprGo-1.1.0.dmg`.
-2. Open the disk image and drag **WhisprGo** to **Applications**.
-3. Control-click the app, choose **Open**, and confirm.
-4. Allow Microphone and Accessibility access when prompted.
+The unreliable 45–125 ms post-paste Accessibility wait has been removed. The replacement key sequence takes 15 ms, while clipboard restoration remains fully asynchronous.
 
-This build is ad-hoc signed, not notarized with an Apple Developer ID. All source code and build steps are available in this repository.
+WhisprGo 1.2.2 is signed with Developer ID, notarized by Apple, and available through automatic updates or the DMG below.

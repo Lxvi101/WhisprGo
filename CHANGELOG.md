@@ -2,6 +2,15 @@
 
 All notable changes to WhisprGo are documented here.
 
+## 1.2.2 — 2026-08-07
+
+- More reliable automatic paste delivery through a complete, privately sourced Command-V event sequence.
+- One-second asynchronous clipboard ownership window for slower web and rich-text editors.
+- No false failure indicator when an editor's Accessibility value lags behind a successful paste.
+- Clipboard session tracking that preserves new user copies and rapid consecutive dictations.
+- Synthetic paste events bypass WhisprGo's configurable global-hotkey handling.
+- Paste delivery no longer waits 45–125 ms for unreliable Accessibility verification.
+
 ## 1.1.0 — 2026-08-06
 
 - Optional beta for 4-bit Gemma 4 E2B cleanup through MLX, with OpenAI kept as the default, automatic download, clear storage/RAM warnings, and delayed unloading after local Pro Mode.

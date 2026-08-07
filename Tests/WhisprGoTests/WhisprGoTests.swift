@@ -569,6 +569,60 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "new user copy")
     }
 
+    @MainActor
+    func testPasteboardSessionOwnershipSurvivesBenignRewriteButNotUserCopy() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let sessionID = UUID().uuidString
+
+        func writeSession() {
+            let item = NSPasteboardItem()
+            item.setString("temporary transcript", forType: .string)
+            item.setString(sessionID, forType: TextInjector.pasteSessionType)
+            pasteboard.clearContents()
+            XCTAssertTrue(pasteboard.writeObjects([item]))
+        }
+
+        writeSession()
+        let originalChangeCount = pasteboard.changeCount
+        XCTAssertTrue(TextInjector.pasteboardIsOwned(
+            pasteboard,
+            expectedChangeCount: originalChangeCount,
+            text: "temporary transcript",
+            sessionID: sessionID
+        ))
+
+        // Clipboard managers and Universal Clipboard can rewrite an item
+        // without changing the text or WhisprGo's session marker.
+        writeSession()
+        XCTAssertNotEqual(pasteboard.changeCount, originalChangeCount)
+        XCTAssertTrue(TextInjector.pasteboardIsOwned(
+            pasteboard,
+            expectedChangeCount: originalChangeCount,
+            text: "temporary transcript",
+            sessionID: sessionID
+        ))
+
+        // Some clipboard tools preserve only the plain string and strip
+        // custom ownership markers while syncing the item.
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("temporary transcript", forType: .string))
+        XCTAssertTrue(TextInjector.pasteboardIsOwned(
+            pasteboard,
+            expectedChangeCount: originalChangeCount,
+            text: "temporary transcript",
+            sessionID: sessionID
+        ))
+
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("new user copy", forType: .string))
+        XCTAssertFalse(TextInjector.pasteboardIsOwned(
+            pasteboard,
+            expectedChangeCount: originalChangeCount,
+            text: "temporary transcript",
+            sessionID: sessionID
+        ))
+    }
+
     func testStartupLineWaveBuildsLeftToRightAndSettlesExactly() throws {
         XCTAssertEqual(StartupMotionPreset.production, .lineWave)
         XCTAssertEqual(StartupMotionPreset.allCases.count, 4)

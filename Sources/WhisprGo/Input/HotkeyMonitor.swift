@@ -232,6 +232,11 @@ final class HotkeyMonitor {
     /// Returns true for key-based shortcuts so their keystrokes do not also
     /// reach the foreground application.
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
+        if event.getIntegerValueField(.eventSourceUserData)
+            == SyntheticEventTag.pasteCommand {
+            return false
+        }
+
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             resetShortcutState(cancelActivePushToTalk: true)
             if let tap {
