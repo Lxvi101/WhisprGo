@@ -1,5 +1,5 @@
 {
-  "originHash" : "1f3f9f4e31ebdf1dfd75de5bf943539b644071f8d6435def7117ec6a8535774c",
+  "originHash" : "c7035536398e968a36ca06dba83f828708eca15464b1fa8d8282a917fa2a540d",
   "pins" : [
     {
       "identity" : "argmax-oss-swift",
@@ -33,8 +33,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ml-explore/mlx-swift",
       "state" : {
-        "revision" : "dc43e62d7055353c7f99fa071a4e71d29dfddc44",
-        "version" : "0.31.4"
+        "revision" : "0bb916c67f4b9e5c682cbe02a42c701c93ab5021",
+        "version" : "0.31.6"
       }
     },
     {
