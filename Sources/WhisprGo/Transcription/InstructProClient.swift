@@ -1,50 +1,5 @@
 import Foundation
 
-actor ProTranscriptionProcessor {
-    private var client: OpenAITextClient?
-    private var clientKey: String?
-    private let localRuntime: LocalProModelRuntime
-
-    init(localRuntime: LocalProModelRuntime) {
-        self.localRuntime = localRuntime
-    }
-
-    func polish(
-        _ rawTranscript: String,
-        context: AccessibilityContextSnapshot?,
-        profilePrompt: String,
-        provider: ProCleanupProvider
-    ) async throws -> String {
-        if provider == .local {
-            return try await localRuntime.polish(
-                rawTranscript,
-                context: context,
-                profilePrompt: profilePrompt
-            )
-        }
-
-        guard let apiKey = KeychainStore.openAIAPIKey(), !apiKey.isEmpty else {
-            throw ProTranscriptionError.missingAPIKey
-        }
-
-        if client == nil || clientKey != apiKey {
-            client = OpenAITextClient(apiKey: apiKey)
-            clientKey = apiKey
-        }
-        guard let client else { throw ProTranscriptionError.invalidResponse }
-        return try await client.polish(
-            rawTranscript,
-            context: context,
-            profilePrompt: profilePrompt
-        )
-    }
-
-    func resetCredentials() {
-        client = nil
-        clientKey = nil
-    }
-}
-
 final class OpenAITextClient {
     static let model = "gpt-5.6-luna"
 
@@ -79,7 +34,7 @@ final class OpenAITextClient {
         request.timeoutInterval = 20
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(ResponseRequest(
+        request.httpBody = try JSONEncoder().encode(InstructResponseRequest(
             model: Self.model,
             instructions: ProTranscriptionPrompt.instructions(
                 profilePrompt: profilePrompt
@@ -90,10 +45,6 @@ final class OpenAITextClient {
             ),
             reasoning: .init(effort: "none"),
             text: .init(verbosity: "low"),
-            // A limit can be reached before any visible text is emitted. A
-            // generous floor does not make short cleanup responses longer;
-            // it only prevents an otherwise successful response from ending
-            // as `incomplete` with no output.
             maxOutputTokens: max(2_048, min(8_192, rawTranscript.utf8.count * 2 + 512)),
             store: false
         ))
@@ -103,16 +54,16 @@ final class OpenAITextClient {
             throw ProTranscriptionError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(APIErrorEnvelope.self, from: data))?
+            let message = (try? JSONDecoder().decode(InstructAPIErrorEnvelope.self, from: data))?
                 .error.message
             throw ProTranscriptionError.remote(
                 message ?? "OpenAI returned HTTP \(http.statusCode)."
             )
         }
 
-        let decoded: ResponseEnvelope
+        let decoded: InstructResponseEnvelope
         do {
-            decoded = try JSONDecoder().decode(ResponseEnvelope.self, from: data)
+            decoded = try JSONDecoder().decode(InstructResponseEnvelope.self, from: data)
         } catch {
             throw ProTranscriptionError.invalidResponse
         }
@@ -249,7 +200,7 @@ enum ProTranscriptionPrompt {
     }
 }
 
-private struct ResponseRequest: Encodable {
+private struct InstructResponseRequest: Encodable {
     struct Reasoning: Encodable { let effort: String }
     struct TextConfiguration: Encodable { let verbosity: String }
 
@@ -272,15 +223,9 @@ private struct ResponseRequest: Encodable {
     }
 }
 
-private struct ResponseEnvelope: Decodable {
-    struct ResponseError: Decodable {
-        let message: String
-    }
-
-    struct IncompleteDetails: Decodable {
-        let reason: String?
-    }
-
+private struct InstructResponseEnvelope: Decodable {
+    struct ResponseError: Decodable { let message: String }
+    struct IncompleteDetails: Decodable { let reason: String? }
     struct OutputItem: Decodable {
         struct Content: Decodable {
             let type: String
@@ -306,7 +251,7 @@ private struct ResponseEnvelope: Decodable {
     }
 }
 
-private struct APIErrorEnvelope: Decodable {
+private struct InstructAPIErrorEnvelope: Decodable {
     struct APIError: Decodable { let message: String }
     let error: APIError
 }
@@ -321,14 +266,12 @@ enum ProTranscriptionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "Pro Mode needs an OpenAI API key."
+            return "Instruct Pro needs an OpenAI API key."
         case .invalidResponse:
-            return "Pro Mode received an invalid response."
+            return "Instruct Pro received an invalid response."
         case let .emptyOutput(suffix):
             return "OpenAI completed the request but returned no cleaned text.\(suffix)"
-        case let .incomplete(message):
-            return message
-        case let .remote(message):
+        case let .incomplete(message), let .remote(message):
             return message
         }
     }

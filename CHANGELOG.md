@@ -2,6 +2,18 @@
 
 All notable changes to WhisprGo are documented here.
 
+## 1.3.0 — 2026-09-30
+
+- Redesigned the menu and Settings: a simpler, monochrome interface that follows the system light or dark appearance, with a live dot-matrix waveform that reacts to your voice.
+- The menu now shows your three most recent dictations; click one to copy it.
+- Settings has a sidebar with General, Models, Profiles, History, and API Keys. Longer explanations moved into hover tooltips.
+- Fixed a recurring crash when WhisprGo switched from a Bluetooth default input
+  to the Mac microphone and AVAudioEngine had not yet refreshed its tap format.
+- Replaced the AirPods-specific toggle with built-in microphone priority, automatic Bluetooth-input blocking, and explicit trusted external-microphone exceptions.
+- Added a persisted Pro engine choice: Instruct Pro remains the default two-pass transcription and GPT-5.6 Luna cleanup path, while Gemini 3.5 Transcribe Smart is available as a one-pass option.
+- Pro profiles provide full custom instructions and bounded nearby-text context to Instruct Pro, or custom-vocabulary hints to Gemini.
+- Removed the MLX/Gemma cleanup runtime and its package dependencies; existing downloads remain user-removable from Settings.
+
 ## 1.2.2 — 2026-08-07
 
 - More reliable automatic paste delivery through a complete, privately sourced Command-V event sequence.

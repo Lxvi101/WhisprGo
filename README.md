@@ -11,17 +11,17 @@ WhisprGo is a low-latency macOS dictation engine that lives in the menu bar. By 
 - Automatic one-time download and warm-up for Parakeet and Whisper models.
 - NVIDIA Parakeet TDT 0.6B v3 plus local Whisper Tiny, Base, Small, and Large v3 Turbo choices.
 - OpenAI `gpt-transcribe`, `gpt-4o-mini-transcribe`, and `whisper-1` choices.
-- Pro cleanup through GPT-5.6 Luna by default, or an optional beta for on-device, 4-bit Gemma 4 E2B accelerated by MLX.
-- API keys stored in macOS Keychain.
-- AirPods mode uses the built-in Mac microphone while leaving headphones in high-quality playback mode.
+- A selectable Pro engine: Instruct Pro uses the chosen Fast transcription model followed by GPT-5.6 Luna cleanup with full profile and nearby-text context; Gemini 3.5 Transcribe Smart provides an optional one-pass path with vocabulary hints.
+- Google and OpenAI API keys stored in macOS Keychain.
+- Built-in microphone priority that ignores Bluetooth headset inputs while allowing explicit USB/external microphone exceptions.
 - Optional always-active input for the lowest possible shortcut-to-audio latency.
 - Optional launch at login.
 - Signed, in-app updates that download, verify, install, and relaunch automatically.
-- A local history of the latest 50 dictations with audio replay, deletion, and re-run using the current model.
+- A local history of the latest 50 dictations with audio replay, deletion, and re-run using the current model. The menu shows the three most recent; click one to copy it.
 
 The default is NVIDIA Parakeet TDT 0.6B v3, running locally through Core ML. It automatically detects and transcribes 25 European languages. Select Whisper Tiny for the smallest resident footprint, or an API model to avoid holding a local model in RAM.
 
-Downloaded transcription models can be removed in **Settings → Models**. The optional On Device (Beta) Gemma cleanup model is managed in **Settings → General → Pro Cleanup**; OpenAI remains the default. Choosing the beta confirms its roughly 4.6 GB download and 5–7 GB loaded unified-memory footprint before downloading automatically. It stays loaded throughout local Pro Mode and unloads five minutes after leaving it.
+Downloaded transcription models can be removed in **Settings → Models**. Choose the Pro engine in **Settings → General → Dictation**. Instruct Pro requires an OpenAI API key; Gemini 3.5 Transcribe requires a Google API key. Both are managed in **Settings → API Keys**. Any retired Gemma cleanup download from an older release remains user-removable from the Dictation section.
 
 Shortcuts are managed in **Settings → General → Shortcuts**. Click any shortcut and press a new key combination; changes apply immediately. WhisprGo prevents duplicates and protects ordinary typing keys from being assigned without a modifier.
 
@@ -64,19 +64,19 @@ On first launch, allow Microphone and Accessibility access. Accessibility is req
 WhisprGo removes avoidable wake-up latency rather than promising impossible zero-time inference:
 
 - The global event tap watches only modifier changes and configured shortcut key edges.
-- The AVAudioEngine graph, converter, and output buffer are reused between dictations.
-- Microphone packets are resampled from their actual delivered frame count; a preallocated worst-case buffer avoids both truncation and render-thread allocation.
-- AirPods mode is on by default and pins this app's input to the built-in Mac microphone without changing the output device.
-- By default, the microphone graph and input tap are fully released while idle.
+- A Core Audio input queue is bound directly to the selected microphone by stable device UID, avoiding AVAudioEngine's private aggregate-device resets.
+- Core Audio converts the microphone's hardware format directly to 16 kHz mono Float32 in reusable queue buffers.
+- The app pins capture to the built-in Mac microphone without changing the output device. Bluetooth inputs are ignored; trusted non-Bluetooth microphones can be explicitly allowed by stable device UID in Settings.
+- By default, the input queue and microphone device are fully released while idle.
 - An explicit “Keep microphone active” setting leaves the hardware stream running for instant response. A lock-free gate exits the callback before conversion, metering, locks, or buffer writes while idle.
-- The audio render callback writes its latest level to one relaxed atomic value; it never queues UI work.
+- The audio queue callback writes its latest level to one relaxed atomic value; it never queues UI work.
 - The recording indicator is a layer-backed AppKit pill synchronized to the display, with no SwiftUI invalidation, Combine publishing, implicit layer animation, or text layout in its recording path.
 - Audio buffers are handed to inference without a full-array copy and modest buffers are reused between dictations.
 - Download progress is coalesced before it reaches the settings UI.
 - Silence is rejected before model inference.
 - Incomplete or failed microphone conversion is rejected before inference instead of producing a plausible but unrelated transcript.
-- Only the selected transcription model is resident continuously. The optional local Pro cleanup model is additionally resident only while local Pro Mode is in use and for a five-minute grace period afterward.
-- Local transcription uses Core ML and Apple Neural Engine defaults; local Pro cleanup uses MLX on Apple silicon.
+- Only the selected transcription model is resident. Instruct Pro keeps it ready for the first pass; Gemini Pro releases it because Gemini receives the audio directly.
+- Local transcription uses Core ML and Apple Neural Engine defaults.
 - Cloud dictation reuses a single ephemeral URLSession connection pool.
 - Text insertion tries the focused Accessibility element before falling back to Unicode key events.
 - History persistence starts only after transcription and text insertion finish; WAV encoding and atomic metadata writes run on a utility-priority actor.
@@ -85,8 +85,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the full lifecycle and tradeoffs.
 
 ## Privacy
 
-Local model audio never leaves the Mac. OpenAI model audio is uploaded only after a dictation ends—when the push-to-talk shortcut is released or the toggle is stopped. With the On Device Pro cleanup beta, the raw transcript and nearby Accessibility context stay on the Mac and are processed by Gemma through MLX. With the default OpenAI Pro cleanup, that bounded text is sent to GPT-5.6 Luna with API storage disabled. API keys are stored in Keychain. WhisprGo keeps the latest 50 completed dictations as local WAV files and metadata under its Application Support folder; each item or the entire history can be deleted from Settings. If always-active input is enabled, idle samples are discarded immediately and never enter a recording buffer or history.
+Local transcription audio never leaves the Mac. OpenAI Fast model audio and Gemini Pro audio are uploaded only after a dictation ends—when the push-to-talk shortcut is released or the toggle is stopped. Instruct Pro first transcribes with the selected Fast model, then sends the transcript, profile instructions, and enabled bounded Accessibility context to OpenAI for cleanup. Gemini Pro sends the audio to Gemini Smart transcription in one pass and reduces enabled context to bounded custom-vocabulary hints. WhisprGo requests deletion of the temporary Gemini file after the response; Google also automatically expires uploaded files. API keys are stored in Keychain. WhisprGo keeps the latest 50 completed dictations as local WAV files and metadata under its Application Support folder; each item or the entire history can be deleted from Settings. If always-active input is enabled, idle samples are discarded immediately and never enter a recording buffer or history.
 
 ## Acknowledgements
 
-The interaction and lean native architecture were inspired by [digimata/parrot](https://github.com/digimata/parrot). Parakeet inference is provided by [FluidAudio](https://github.com/FluidInference/FluidAudio), Whisper inference by [Argmax's open-source WhisperKit SDK](https://github.com/argmaxinc/argmax-oss-swift), and local cleanup by [MLX Swift LM](https://github.com/ml-explore/mlx-swift-lm) with the [Unsloth Gemma 4 E2B MLX conversion](https://huggingface.co/unsloth/gemma-4-E2B-it-UD-MLX-4bit).
+The interaction and lean native architecture were inspired by [digimata/parrot](https://github.com/digimata/parrot). Parakeet inference is provided by [FluidAudio](https://github.com/FluidInference/FluidAudio), and Whisper inference by [Argmax's open-source WhisperKit SDK](https://github.com/argmaxinc/argmax-oss-swift).

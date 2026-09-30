@@ -5,6 +5,7 @@ enum KeychainStore {
     private static let service = "com.whisprgo.credentials"
     private static let legacyService = "com.whisprflow.credentials"
     private static let openAIAccount = "openai-api-key"
+    private static let googleAccount = "google-api-key"
 
     static func openAIAPIKey() -> String? {
         if let saved = read(account: openAIAccount, service: service) {
@@ -31,6 +32,21 @@ enum KeychainStore {
         } else {
             try save(trimmed, account: openAIAccount, service: service)
             try delete(account: openAIAccount, service: legacyService)
+        }
+    }
+
+    static func googleAPIKey() -> String? {
+        read(account: googleAccount, service: service)
+            ?? ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
+            ?? ProcessInfo.processInfo.environment["GOOGLE_API_KEY"]
+    }
+
+    static func saveGoogleAPIKey(_ key: String) throws {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try delete(account: googleAccount, service: service)
+        } else {
+            try save(trimmed, account: googleAccount, service: service)
         }
     }
 

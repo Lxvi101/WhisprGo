@@ -19,22 +19,6 @@ let package = Package(
             exact: "0.15.5"
         ),
         .package(
-            url: "https://github.com/ml-explore/mlx-swift-lm",
-            exact: "3.31.4"
-        ),
-        .package(
-            url: "https://github.com/ml-explore/mlx-swift",
-            exact: "0.31.4"
-        ),
-        .package(
-            url: "https://github.com/huggingface/swift-huggingface",
-            exact: "0.9.0"
-        ),
-        .package(
-            url: "https://github.com/huggingface/swift-transformers",
-            from: "1.3.0"
-        ),
-        .package(
             url: "https://github.com/sparkle-project/Sparkle",
             exact: "2.9.2"
         ),
@@ -46,11 +30,6 @@ let package = Package(
                 "AtomicSupport",
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
-                .product(name: "MLX", package: "mlx-swift"),
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "HuggingFace", package: "swift-huggingface"),
-                .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/WhisprGo",

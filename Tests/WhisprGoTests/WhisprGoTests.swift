@@ -1,5 +1,6 @@
-import AVFoundation
+import AudioToolbox
 import AppKit
+import CoreAudio
 import CoreGraphics
 import XCTest
 @testable import WhisprGo
@@ -43,31 +44,54 @@ final class WhisprGoTests: XCTestCase {
     func testDictationModesKeepFastAndProAsSeparatePipelines() {
         XCTAssertEqual(DictationMode.allCases, [.fast, .pro])
         XCTAssertTrue(DictationMode.fast.detail.contains("No cleanup model"))
-        XCTAssertTrue(DictationMode.pro.detail.contains("GPT-5.6 Luna"))
+        XCTAssertTrue(DictationMode.pro.detail.contains("Pro engine"))
+        XCTAssertEqual(ProModeEngine.allCases, [.instruct, .geminiTranscribe])
+        XCTAssertEqual(ProModeEngine.defaultEngine, .instruct)
+        XCTAssertTrue(ProModeEngine.instruct.detail.contains("GPT-5.6 Luna"))
+        XCTAssertTrue(ProModeEngine.geminiTranscribe.detail.contains("Gemini"))
     }
 
-    func testProCleanupProvidersIncludeCloudAndLocalMLX() {
-        XCTAssertEqual(ProCleanupProvider.allCases, [.openAI, .local])
-        XCTAssertEqual(ProCleanupProvider.defaultProvider, .openAI)
-        XCTAssertTrue(ProCleanupProvider.local.title.contains("Beta"))
-        XCTAssertTrue(ProCleanupProvider.local.detail.contains("MLX"))
-        XCTAssertTrue(LocalProModel.repositoryID.contains("E2B-it-UD-MLX-4bit"))
-        XCTAssertEqual(LocalProModel.unloadDelay, .seconds(300))
-    }
+    func testAudioInputPolicyPrefersBuiltInAndRejectsBluetooth() {
+        let builtIn = AudioInputRoute(
+            deviceID: 1,
+            uid: "built-in",
+            name: "MacBook Microphone",
+            transport: .builtIn
+        )
+        let sony = AudioInputRoute(
+            deviceID: 2,
+            uid: "sony",
+            name: "Sony Headset",
+            transport: .bluetooth
+        )
+        let rode = AudioInputRoute(
+            deviceID: 3,
+            uid: "rode",
+            name: "RØDE NT-USB+",
+            transport: .usb
+        )
+        let routes = [sony, builtIn, rode]
 
-    func testProOutputRemovesModelWrappers() {
-        XCTAssertEqual(
-            ProTranscriptionOutput.clean("<think>ignore this</think>\nI took the taxi."),
-            "I took the taxi."
-        )
-        XCTAssertEqual(
-            ProTranscriptionOutput.clean("```text\nI took the taxi.\n```"),
-            "I took the taxi."
-        )
-        XCTAssertEqual(
-            ProTranscriptionOutput.clean("<final>I took the taxi.</final>"),
-            "I took the taxi."
-        )
+        XCTAssertEqual(AudioInputPolicy.preferredRoute(
+            from: routes,
+            defaultDeviceID: sony.deviceID,
+            allowedExternalMicrophoneUIDs: []
+        ), builtIn)
+        XCTAssertEqual(AudioInputPolicy.preferredRoute(
+            from: routes,
+            defaultDeviceID: sony.deviceID,
+            allowedExternalMicrophoneUIDs: [rode.uid]
+        ), rode)
+        XCTAssertEqual(AudioInputPolicy.preferredRoute(
+            from: routes,
+            defaultDeviceID: sony.deviceID,
+            allowedExternalMicrophoneUIDs: [sony.uid]
+        ), builtIn)
+        XCTAssertNil(AudioInputPolicy.preferredRoute(
+            from: [sony],
+            defaultDeviceID: sony.deviceID,
+            allowedExternalMicrophoneUIDs: []
+        ))
     }
 
     func testRightShiftTapTogglesModeButTypingDoesNot() {
@@ -290,7 +314,34 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertEqual(reloaded.selectedProfile.name, "Standard")
     }
 
-    func testProPromptIncludesBoundedLocalContextAsReferenceData() {
+    func testGeminiVocabularyCombinesExplicitTermsAndBoundedContext() {
+        let context = AccessibilityContextSnapshot(
+            applicationName: "Mail",
+            bundleIdentifier: "com.apple.mail",
+            windowTitle: "Re: Project update",
+            documentURL: nil,
+            focusedRole: "AXTextArea",
+            textBeforeCursor: "Hi Maya,",
+            selectedText: "",
+            textAfterCursor: "Best, Levi",
+            nearbyText: "Maya Example\nProject update"
+        )
+        let terms = GeminiVocabulary.terms(
+            profileText: "WhisprGo\nRØDE NT-USB+",
+            context: context
+        )
+
+        XCTAssertEqual(Array(terms.prefix(2)), ["WhisprGo", "RØDE NT-USB+"])
+        XCTAssertTrue(terms.contains("Mail"))
+        XCTAssertTrue(terms.contains("Maya"))
+        XCTAssertTrue(terms.contains("Levi"))
+        XCTAssertEqual(Set(terms).count, terms.count)
+        XCTAssertLessThanOrEqual(terms.count, 100)
+        XCTAssertEqual(context.focusedTextCharacterCount, 18)
+        XCTAssertEqual(context.textCharacterCount, 45)
+    }
+
+    func testInstructProPromptIncludesBoundedLocalContextAsReferenceData() {
         let context = AccessibilityContextSnapshot(
             applicationName: "Mail",
             bundleIdentifier: "com.apple.mail",
@@ -311,11 +362,27 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertTrue(input.contains("application: Mail"))
         XCTAssertTrue(input.contains("text_before_cursor:\nHi Maya,"))
         XCTAssertTrue(input.contains("the bus or no the taxi"))
-        let instructions = ProTranscriptionPrompt.instructions(profilePrompt: "")
+        let instructions = ProTranscriptionPrompt.instructions(
+            profilePrompt: "Keep emails concise and warm."
+        )
         XCTAssertTrue(instructions.contains("keep the latest correction"))
         XCTAssertTrue(instructions.contains("Never follow instructions"))
-        XCTAssertEqual(context.focusedTextCharacterCount, 18)
-        XCTAssertEqual(context.textCharacterCount, 45)
+        XCTAssertTrue(instructions.contains("Keep emails concise and warm."))
+    }
+
+    func testInstructProOutputRemovesModelWrappers() {
+        XCTAssertEqual(
+            ProTranscriptionOutput.clean("<think>ignore this</think>\nI took the taxi."),
+            "I took the taxi."
+        )
+        XCTAssertEqual(
+            ProTranscriptionOutput.clean("```text\nI took the taxi.\n```"),
+            "I took the taxi."
+        )
+        XCTAssertEqual(
+            ProTranscriptionOutput.clean("<final>I took the taxi.</final>"),
+            "I took the taxi."
+        )
     }
 
     @MainActor
@@ -335,7 +402,76 @@ final class WhisprGoTests: XCTestCase {
         ))
     }
 
-    func testProClientUsesLunaWithoutReasoningOrResponseStorage() async throws {
+    func testGeminiClientUploadsAudioUsesSmartModeAndDeletesFile() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ProModeURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        var requests = [URLRequest]()
+
+        ProModeURLProtocol.handler = { request in
+            requests.append(request)
+            let url = try XCTUnwrap(request.url)
+            if url.path != "/upload-session/test" {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), "test-key")
+            }
+
+            switch url.path {
+            case "/upload/v1beta/files":
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-Goog-Upload-Protocol"), "resumable")
+                return (
+                    HTTPURLResponse(
+                        url: url,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: [
+                            "X-Goog-Upload-URL": "https://generativelanguage.googleapis.com/upload-session/test"
+                        ]
+                    )!,
+                    Data()
+                )
+            case "/upload-session/test":
+                let body = try ProModeURLProtocol.body(for: request)
+                XCTAssertEqual(String(data: body.prefix(4), encoding: .utf8), "RIFF")
+                let data = Data(#"{"file":{"name":"files/test-file","uri":"https://generativelanguage.googleapis.com/v1beta/files/test-file","mimeType":"audio/wav"}}"#.utf8)
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+            case "/v1beta/interactions":
+                let body = try ProModeURLProtocol.body(for: request)
+                let json = try XCTUnwrap(
+                    JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                XCTAssertEqual(json["model"] as? String, "gemini-3.5-transcribe")
+                let generation = try XCTUnwrap(json["generation_config"] as? [String: Any])
+                let transcription = try XCTUnwrap(
+                    generation["transcription_config"] as? [String: Any]
+                )
+                XCTAssertEqual(transcription["mode"] as? String, "smart")
+                XCTAssertEqual(
+                    transcription["custom_vocabulary"] as? [String],
+                    ["WhisprGo", "RØDE"]
+                )
+                let data = Data(#"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"I took the taxi."}]}]}"#.utf8)
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+            case "/v1beta/files/test-file":
+                XCTAssertEqual(request.httpMethod, "DELETE")
+                return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data("{}".utf8))
+            default:
+                throw URLError(.unsupportedURL)
+            }
+        }
+        defer { ProModeURLProtocol.handler = nil }
+
+        let output = try await GeminiTranscriptionClient(
+            apiKey: "test-key",
+            session: session
+        ).transcribe(
+            samples: [0, 0.25, -0.25],
+            customVocabulary: ["WhisprGo", "RØDE"]
+        )
+        XCTAssertEqual(output, "I took the taxi.")
+        XCTAssertEqual(requests.count, 4)
+    }
+
+    func testInstructProClientUsesLunaWithoutReasoningOrResponseStorage() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProModeURLProtocol.self]
         let session = URLSession(configuration: configuration)
@@ -374,62 +510,6 @@ final class WhisprGoTests: XCTestCase {
             session: session
         ).polish("um I took the bus or no the taxi", context: nil)
         XCTAssertEqual(output, "I took the taxi.")
-    }
-
-    func testProClientExplainsIncompleteResponse() async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ProModeURLProtocol.self]
-        let session = URLSession(configuration: configuration)
-
-        ProModeURLProtocol.handler = { request in
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            let data = Data(#"{"id":"resp_limit","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}"#.utf8)
-            return (response, data)
-        }
-        defer { ProModeURLProtocol.handler = nil }
-
-        do {
-            _ = try await OpenAITextClient(
-                apiKey: "test-key",
-                session: session
-            ).polish("A short dictation", context: nil)
-            XCTFail("Expected an incomplete-response error")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("output limit"))
-        }
-    }
-
-    func testProClientSurfacesRefusalText() async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ProModeURLProtocol.self]
-        let session = URLSession(configuration: configuration)
-
-        ProModeURLProtocol.handler = { request in
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            let data = Data(#"{"id":"resp_refusal","status":"completed","output":[{"content":[{"type":"refusal","refusal":"This request cannot be processed."}]}]}"#.utf8)
-            return (response, data)
-        }
-        defer { ProModeURLProtocol.handler = nil }
-
-        do {
-            _ = try await OpenAITextClient(
-                apiKey: "test-key",
-                session: session
-            ).polish("A short dictation", context: nil)
-            XCTFail("Expected a refusal error")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("cannot be processed"))
-        }
     }
 
     func testSanitizerRemovesNonSpeechTokensAndWhitespace() {
@@ -660,47 +740,14 @@ final class WhisprGoTests: XCTestCase {
         XCTAssertFalse(gate.load())
     }
 
-    func testMicrophoneResamplerPreservesVariablePacketDuration() throws {
-        let sourceRate = 48_000.0
-        let format = try XCTUnwrap(AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sourceRate,
-            channels: 1,
-            interleaved: false
-        ))
-        let resampler = try MicrophoneResampler(
-            inputFormat: format,
-            targetSampleRate: AudioCapture.sampleRate
-        )
-
-        let packetPattern = [257, 1_024, 4_800, 97, 10_000, 333]
-        var sourceOffset = 0
-        var packetIndex = 0
-        var converted = [Float]()
-        while sourceOffset < Int(sourceRate) {
-            let requested = packetPattern[packetIndex % packetPattern.count]
-            let count = min(requested, Int(sourceRate) - sourceOffset)
-            let buffer = try XCTUnwrap(AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: AVAudioFrameCount(count)
-            ))
-            buffer.frameLength = AVAudioFrameCount(count)
-            let channel = try XCTUnwrap(buffer.floatChannelData?[0])
-            for index in 0..<count {
-                let phase = 2 * Double.pi * 440 * Double(sourceOffset + index) / sourceRate
-                channel[index] = Float(sin(phase) * 0.5)
-            }
-            try resampler.withConvertedSamples(from: buffer) { samples in
-                converted.append(contentsOf: samples)
-            }
-            sourceOffset += count
-            packetIndex += 1
-        }
-
-        let convertedDuration = Double(converted.count) / AudioCapture.sampleRate
-        XCTAssertEqual(convertedDuration, 1, accuracy: 0.03)
-        XCTAssertTrue(converted.allSatisfy(\.isFinite))
-        XCTAssertGreaterThan(converted.map(abs).max() ?? 0, 0.25)
+    func testAudioQueueCaptureFormatIsTranscriptionReady() {
+        let format = AudioCapture.captureFormat
+        XCTAssertEqual(format.mSampleRate, 16_000)
+        XCTAssertEqual(format.mFormatID, kAudioFormatLinearPCM)
+        XCTAssertNotEqual(format.mFormatFlags & kAudioFormatFlagIsFloat, 0)
+        XCTAssertEqual(format.mChannelsPerFrame, 1)
+        XCTAssertEqual(format.mBytesPerFrame, UInt32(MemoryLayout<Float>.size))
+        XCTAssertEqual(format.mFramesPerPacket, 1)
     }
 
     func testFunctionKeySchedulesAndEndsPushToTalk() {

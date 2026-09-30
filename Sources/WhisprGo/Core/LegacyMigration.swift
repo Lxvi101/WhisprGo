@@ -8,7 +8,6 @@ enum LegacyMigration {
         "selectedModelID",
         "appendTrailingSpace",
         "keepMicrophoneActive",
-        "preferBuiltInMicrophone",
         "defaultModelVersion",
     ]
 

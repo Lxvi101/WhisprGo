@@ -27,42 +27,37 @@ struct HotkeyRecorderRow: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(action.title)
-                    .font(.system(size: 13, weight: .semibold))
-                Text(action.detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
+            Text(action.title)
+                .help(action.detail)
 
             Spacer(minLength: 12)
 
             Button(action: onStart) {
                 Group {
                     if isRecording {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(.orange)
-                                .frame(width: 7, height: 7)
-                            Text("Press shortcut…")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
+                        Text("Press keys…")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Signal.textSecondary)
                     } else {
                         HotkeyCapsView(shortcut: shortcut, compact: true)
                     }
                 }
-                .frame(minWidth: 112, minHeight: 26)
-                .padding(.horizontal, 8)
+                .transition(.blurReplace)
+                .frame(minWidth: 96, minHeight: 24)
+                .padding(.horizontal, 6)
                 .background(
-                    isRecording ? Color.orange.opacity(0.08) : Color(nsColor: .controlBackgroundColor)
+                    Signal.surface,
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(
-                            isRecording ? Color.orange : Color.primary.opacity(0.14),
-                            lineWidth: isRecording ? 1.5 : 1
+                        .strokeBorder(
+                            isRecording ? Color.primary.opacity(0.6) : Signal.hairline,
+                            lineWidth: 1
                         )
                 }
+                .animation(Signal.quick, value: isRecording)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Change \(action.title) shortcut")
@@ -77,7 +72,6 @@ struct HotkeyRecorderRow: View {
                 .opacity(0.01)
             }
         }
-        .padding(.vertical, 3)
     }
 }
 

@@ -18,8 +18,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             )
             let window = NSWindow(contentViewController: hostingController)
             window.title = "WhisprGo Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 660, height: 520))
+            window.styleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.isMovableByWindowBackground = true
+            window.setContentSize(NSSize(width: 760, height: 560))
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.center()

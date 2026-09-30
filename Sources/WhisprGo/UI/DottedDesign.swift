@@ -1,6 +1,31 @@
 import AppKit
 import SwiftUI
 
+/// WhisprGo's visual language: monochrome, adaptive to light and dark
+/// appearance, with the dot-matrix waveform as the only ornament.
+enum Signal {
+    static let background = Color(nsColor: .windowBackgroundColor)
+    static let surface = Color.primary.opacity(0.04)
+    static let surfaceHover = Color.primary.opacity(0.07)
+    static let hairline = Color.primary.opacity(0.1)
+    static let text = Color.primary
+    static let textSecondary = Color.secondary
+    static let textTertiary = Color.primary.opacity(0.35)
+    /// Content drawn on top of a primary-colored fill.
+    static let inverse = Color(nsColor: .windowBackgroundColor)
+    /// Monochrome tint for native controls such as switches. Near-black in
+    /// light mode; mid-gray in dark mode so a white switch knob stays visible.
+    static let control = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 0.62, alpha: 1)
+            : NSColor(white: 0.12, alpha: 1)
+    })
+
+    /// Critically damped: taps start at rest, so nothing here earns a bounce.
+    static let motion = Animation.spring(response: 0.42, dampingFraction: 1)
+    static let quick = Animation.spring(response: 0.28, dampingFraction: 1)
+}
+
 @MainActor
 enum BrandAssets {
     static let menuBarIcon: NSImage = {
@@ -61,20 +86,6 @@ struct BrandWaveform: View {
     }
 }
 
-struct DottedRule: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<9, id: \.self) { index in
-                Circle()
-                    .fill(Color.primary.opacity(index == 4 ? 0.34 : 0.14))
-                    .frame(width: index == 4 ? 3 : 2, height: index == 4 ? 3 : 2)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityHidden(true)
-    }
-}
-
 struct DottedSectionLabel: View {
     let title: String
 
@@ -83,40 +94,28 @@ struct DottedSectionLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            HStack(spacing: 2.5) {
-                Circle().frame(width: 3, height: 3)
-                Circle().frame(width: 3, height: 3)
-                Circle().frame(width: 3, height: 3)
-            }
-            .foregroundStyle(.secondary)
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .tracking(0.7)
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Signal.textSecondary)
     }
 }
 
 struct MinimalPanel<Content: View>: View {
     private let content: Content
+    private let padding: CGFloat
 
-    init(@ViewBuilder content: () -> Content) {
+    init(padding: CGFloat = 14, @ViewBuilder content: () -> Content) {
+        self.padding = padding
         self.content = content()
     }
 
     var body: some View {
         content
-            .padding(12)
-            .background(
-                Color(nsColor: .controlBackgroundColor).opacity(0.72),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-            )
+            .padding(padding)
+            .background(Signal.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(Signal.hairline, lineWidth: 1)
             }
     }
 }
@@ -131,20 +130,12 @@ struct MinimalBadge: View {
     }
 
     var body: some View {
-        Text(text.uppercased())
-            .font(.system(size: 8, weight: .bold))
-            .tracking(0.6)
-            .foregroundStyle(filled ? Color(nsColor: .textBackgroundColor) : .secondary)
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(filled ? Signal.inverse : Signal.textSecondary)
             .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background {
-                Capsule()
-                    .fill(filled ? Color.primary : Color.clear)
-            }
-            .overlay {
-                Capsule()
-                    .stroke(Color.primary.opacity(filled ? 0 : 0.18), lineWidth: 1)
-            }
+            .padding(.vertical, 3)
+            .background(Capsule().fill(filled ? Color.primary : Signal.surfaceHover))
     }
 }
 
@@ -161,24 +152,14 @@ struct MinimalKeyCap: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2.weight(.semibold).monospaced())
+            .font(.system(size: compact ? 10 : 11, weight: .medium, design: .rounded))
+            .foregroundStyle(inverted ? Signal.inverse : Signal.text)
             .padding(.horizontal, compact ? 5 : 6)
-            .padding(.vertical, compact ? 2 : 3)
+            .frame(minWidth: compact ? 18 : 22, minHeight: compact ? 18 : 22)
             .background(
-                inverted
-                    ? Color(nsColor: .textBackgroundColor).opacity(0.15)
-                    : Color.primary.opacity(0.055),
+                inverted ? Signal.inverse.opacity(0.16) : Signal.surfaceHover,
                 in: RoundedRectangle(cornerRadius: 5, style: .continuous)
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .stroke(
-                        inverted
-                            ? Color(nsColor: .textBackgroundColor).opacity(0.25)
-                            : Color.primary.opacity(0.12),
-                        lineWidth: 1
-                    )
-            }
     }
 }
 
@@ -188,29 +169,96 @@ struct DotSelectionIndicator: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.primary.opacity(isSelected ? 0.8 : 0.22), lineWidth: 1.2)
-                .frame(width: 16, height: 16)
-            if isSelected {
-                Circle()
-                    .fill(Color.primary)
-                    .frame(width: 7, height: 7)
-            }
+                .strokeBorder(
+                    isSelected ? Color.primary : Signal.textTertiary,
+                    lineWidth: 1.2
+                )
+            Circle()
+                .fill(Color.primary)
+                .padding(4.5)
+                .scaleEffect(isSelected ? 1 : 0.2)
+                .opacity(isSelected ? 1 : 0)
         }
+        .frame(width: 16, height: 16)
+        .animation(Signal.quick, value: isSelected)
         .accessibilityHidden(true)
     }
 }
 
+/// The one filled, primary-colored call to action.
 struct MonochromePrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(Color(nsColor: .textBackgroundColor))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .foregroundStyle(Signal.inverse)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             .background(
-                Color.primary.opacity(configuration.isPressed ? 0.78 : 0.96),
-                in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                Color.primary.opacity(configuration.isPressed ? 0.8 : 1),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .animation(Signal.quick, value: configuration.isPressed)
+    }
+}
+
+/// Compact capsule buttons. Prominent buttons are filled with the primary color.
+struct SignalPillButtonStyle: ButtonStyle {
+    var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(prominent ? Signal.inverse : Signal.text)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                prominent
+                    ? Color.primary.opacity(configuration.isPressed ? 0.8 : 1)
+                    : Color.primary.opacity(configuration.isPressed ? 0.12 : 0.07),
+                in: Capsule()
+            )
+            .opacity(isEnabled ? 1 : 0.4)
+            .animation(Signal.quick, value: configuration.isPressed)
+    }
+}
+
+/// A segmented control whose selection pill slides between options.
+struct SignalSegmentedControl<Value: Hashable, Label: View>: View {
+    let options: [Value]
+    @Binding var selection: Value
+    @ViewBuilder let label: (Value) -> Label
+    @Namespace private var namespace
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = option == selection
+                Button {
+                    withAnimation(Signal.motion) { selection = option }
+                } label: {
+                    label(option)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isSelected ? Signal.text : Signal.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 26)
+                        .background {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(Signal.background)
+                                    .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+                                    .matchedGeometryEffect(id: "pill", in: namespace)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Signal.surfaceHover, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }

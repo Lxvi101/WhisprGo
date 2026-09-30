@@ -1,12 +1,33 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
-enum SettingsTab: Hashable {
+enum SettingsTab: Hashable, CaseIterable {
     case general
     case models
     case profiles
     case history
     case providers
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .models: return "Models"
+        case .profiles: return "Profiles"
+        case .history: return "History"
+        case .providers: return "API Keys"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: return "gearshape"
+        case .models: return "waveform"
+        case .profiles: return "text.quote"
+        case .history: return "clock"
+        case .providers: return "key"
+        }
+    }
 }
 
 @MainActor
@@ -20,33 +41,103 @@ struct SettingsView: View {
     @ObservedObject private var navigation = SettingsNavigation.shared
 
     var body: some View {
-        TabView(selection: $navigation.selection) {
-            GeneralSettingsPane(engine: engine)
-                .tabItem { Label("General", systemImage: "slider.horizontal.3") }
-                .tag(SettingsTab.general)
+        HStack(spacing: 0) {
+            SettingsSidebar(selection: $navigation.selection)
+                .frame(width: 184)
 
-            ModelSettingsPane(engine: engine)
-                .tabItem { Label("Models", systemImage: "circle.grid.3x3") }
-                .tag(SettingsTab.models)
+            Divider()
+                .ignoresSafeArea()
 
-            ProfileSettingsPane(engine: engine)
-                .tabItem { Label("Profiles", systemImage: "text.badge.star") }
-                .tag(SettingsTab.profiles)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(navigation.selection.title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .tracking(-0.4)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 46)
+                    .padding(.bottom, 6)
+                    .id(navigation.selection)
+                    .transition(.blurReplace)
 
-            HistorySettingsPane(engine: engine)
-                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
-                .tag(SettingsTab.history)
-
-            ProviderSettingsPane(engine: engine)
-                .tabItem { Label("Providers", systemImage: "key") }
-                .tag(SettingsTab.providers)
+                ZStack {
+                    pane(for: navigation.selection)
+                        .id(navigation.selection)
+                        .transition(.blurReplace)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .ignoresSafeArea(.container, edges: .top)
+            .animation(Signal.motion, value: navigation.selection)
         }
-        .tint(.primary)
-        .scenePadding()
-        .frame(width: 660, height: 520)
+        .frame(width: 760, height: 560)
+        .background(Signal.background)
+        .tint(Signal.control)
         .onAppear {
             engine.refreshPermissions()
+            engine.refreshMicrophoneRoutes()
         }
+    }
+
+    @ViewBuilder
+    private func pane(for tab: SettingsTab) -> some View {
+        switch tab {
+        case .general: GeneralSettingsPane(engine: engine)
+        case .models: ModelSettingsPane(engine: engine)
+        case .profiles: ProfileSettingsPane(engine: engine)
+        case .history: HistorySettingsPane(engine: engine)
+        case .providers: ProviderSettingsPane(engine: engine)
+        }
+    }
+}
+
+private struct SettingsSidebar: View {
+    @Binding var selection: SettingsTab
+    @Namespace private var namespace
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                item(tab)
+            }
+            Spacer()
+            BrandWaveform()
+                .frame(width: 34, height: 19)
+                .foregroundStyle(Signal.textTertiary)
+                .padding(.bottom, 18)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 44)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color.primary.opacity(0.03))
+        .ignoresSafeArea()
+    }
+
+    private func item(_ tab: SettingsTab) -> some View {
+        let isSelected = selection == tab
+        return Button {
+            withAnimation(Signal.motion) { selection = tab }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: tab.systemImage)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 16)
+                Text(tab.title)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                Spacer()
+            }
+            .foregroundStyle(isSelected ? Signal.text : Signal.textSecondary)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Signal.surfaceHover)
+                        .matchedGeometryEffect(id: "selection", in: namespace)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -57,35 +148,29 @@ private struct HistorySettingsPane: View {
     @State private var inspectedEntry: DictationHistoryEntry?
 
     var body: some View {
-        SettingsPaneContainer(
-            title: "History",
-            subtitle: "Replay or re-run recent dictations"
-        ) {
+        SettingsPaneContainer {
             VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Saved only on this Mac")
-                            .font(.callout.weight(.medium))
-                        Text("The latest 50 recordings are kept. Re-run uses your currently selected model and types the new result.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                HStack(spacing: 10) {
+                    Text("\(history.entries.count) of 50")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Signal.textSecondary)
+                        .monospacedDigit()
                     Spacer()
-                    MinimalBadge("\(history.entries.count) / 50")
                     Button("Clear All", role: .destructive) {
                         isConfirmingClear = true
                     }
+                    .buttonStyle(SignalPillButtonStyle())
                     .disabled(history.entries.isEmpty)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 13)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 10)
 
                 if let error = history.lastError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 18)
+                        .padding(.horizontal, 24)
                         .padding(.bottom, 9)
                 }
 
@@ -93,7 +178,7 @@ private struct HistorySettingsPane: View {
                     HistoryEmptyState()
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 9) {
+                        LazyVStack(spacing: 8) {
                             ForEach(history.entries) { entry in
                                 HistoryRow(
                                     entry: entry,
@@ -107,8 +192,8 @@ private struct HistorySettingsPane: View {
                                 )
                             }
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 18)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 24)
                     }
                 }
             }
@@ -134,13 +219,11 @@ private struct HistoryEmptyState: View {
     var body: some View {
         VStack(spacing: 12) {
             BrandWaveform()
-                .frame(width: 120, height: 66)
-                .opacity(0.52)
+                .frame(width: 88, height: 48)
+                .foregroundStyle(Signal.textTertiary)
             Text("No dictations yet")
-                .font(.headline)
-            Text("Finished recordings will appear here after transcription.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13))
+                .foregroundStyle(Signal.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
@@ -158,16 +241,13 @@ private struct HistoryRow: View {
     let onRemove: () -> Void
     @State private var isCopied = false
     @State private var copyGeneration = 0
+    @State private var isHovered = false
 
     var body: some View {
         ZStack {
             Button(action: copyTranscript) {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(
-                        isCopied
-                            ? Color.green.opacity(0.13)
-                            : Color.primary.opacity(0.018)
-                    )
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isCopied ? Signal.surfaceHover : Signal.surface)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -177,11 +257,14 @@ private struct HistoryRow: View {
                 Button(action: onPlay) {
                     ZStack {
                         Circle()
-                            .stroke(Color.primary.opacity(0.22), lineWidth: 1)
-                            .frame(width: 34, height: 34)
+                            .fill(isPlaying ? Color.primary : Signal.surfaceHover)
                         Image(systemName: isPlaying ? "stop.fill" : "play.fill")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(isPlaying ? Signal.inverse : Signal.text)
+                            .contentTransition(.symbolEffect(.replace))
                     }
+                    .frame(width: 30, height: 30)
+                    .animation(Signal.quick, value: isPlaying)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPlaying ? "Stop recording" : "Play recording")
@@ -189,54 +272,34 @@ private struct HistoryRow: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 7) {
                         Text(HistoryLabels.date(entry.createdAt))
-                            .font(.caption.weight(.medium))
-                        Text("·")
-                            .foregroundStyle(.tertiary)
                         Text(HistoryLabels.duration(entry.duration))
-                            .font(.caption.monospacedDigit())
-                        MinimalBadge("Audio")
+                            .monospacedDigit()
                         if isCopied {
                             Label("Copied", systemImage: "checkmark")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.green)
-                                .transition(.opacity)
+                                .foregroundStyle(Signal.text)
+                                .transition(.blurReplace)
                         }
                     }
 
+                    .font(.system(size: 11))
+                    .foregroundStyle(Signal.textSecondary)
+
                     Text(previewText)
-                        .font(.callout)
+                        .font(.system(size: 13))
                         .foregroundStyle(entry.transcript.isEmpty ? .secondary : .primary)
                         .lineLimit(3)
                         .truncationMode(.tail)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, minHeight: 50, maxHeight: 50, alignment: .topLeading)
-                        .clipped()
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                         .layoutPriority(1)
-
-                    HStack(spacing: 7) {
-                        Text(entry.modelName)
-                        if let latency = entry.latency {
-                            Text("·")
-                            Text("\(latency.formatted(.number.precision(.fractionLength(2))))s")
-                                .monospacedDigit()
-                        }
-                        if let error = entry.errorMessage {
-                            Text("·")
-                            Text(error)
-                                .help(error)
-                        }
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
                 }
+                .help(entry.modelName)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(spacing: 6) {
+                HStack(spacing: 2) {
                     HistoryIconButton(
-                        systemImage: "doc.text.magnifyingglass",
-                        label: "Inspect full transcript",
+                        systemImage: "arrow.up.left.and.arrow.down.right",
+                        label: "Open full transcript",
                         action: onInspect
                     )
                     HistoryIconButton(
@@ -248,23 +311,18 @@ private struct HistoryRow: View {
                     )
                     HistoryIconButton(
                         systemImage: "trash",
-                        label: "Delete recording",
-                        isDestructive: true,
+                        label: "Delete",
                         action: onRemove
                     )
                 }
-                .frame(width: 28)
+                .opacity(isHovered || isRerunning ? 1 : 0)
             }
             .padding(12)
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(
-                    isCopied ? Color.green.opacity(0.55) : Color.primary.opacity(0.12),
-                    lineWidth: 1
-                )
+        .onHover { hovering in
+            withAnimation(Signal.quick) { isHovered = hovering }
         }
-        .animation(.easeOut(duration: 0.16), value: isCopied)
+        .animation(Signal.quick, value: isCopied)
     }
 
     private var fullText: String {
@@ -297,24 +355,21 @@ private struct HistoryIconButton: View {
     let label: String
     var isBusy = false
     var isDisabled = false
-    var isDestructive = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(0.045))
                 if isBusy {
                     ProgressView()
                         .controlSize(.mini)
                 } else {
                     Image(systemName: systemImage)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(isDestructive ? Color.red.opacity(0.82) : Color.primary)
+                        .foregroundStyle(Signal.textSecondary)
                 }
             }
-            .frame(width: 27, height: 27)
+            .frame(width: 26, height: 26)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -346,55 +401,51 @@ private struct TranscriptDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                BrandWaveform()
-                    .frame(width: 76, height: 42)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Full Transcript")
-                        .font(.title3.weight(.medium))
-                    Text("\(HistoryLabels.date(entry.createdAt))  ·  \(HistoryLabels.duration(entry.duration))  ·  \(entry.modelName)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            HStack {
+                Text("\(HistoryLabels.date(entry.createdAt))  ·  \(HistoryLabels.duration(entry.duration))  ·  \(entry.modelName)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Signal.textSecondary)
                 Spacer()
             }
-            .padding(18)
-
-            DottedRule()
-                .padding(.horizontal, 18)
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 4)
 
             if let error = entry.errorMessage {
                 HStack(alignment: .top, spacing: 9) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundStyle(.orange)
+                    Image(systemName: "exclamationmark.circle")
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 24)
                 .padding(.top, 14)
             }
 
             LargeSelectableTextView(text: fullText)
                 .padding(18)
 
-            HStack {
+            HStack(spacing: 8) {
                 if isCopied {
                     Label("Copied", systemImage: "checkmark")
-                        .foregroundStyle(.green)
-                        .font(.callout.weight(.medium))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Signal.textSecondary)
+                        .transition(.blurReplace)
                 }
                 Spacer()
                 Button("Copy All", action: copyAll)
+                    .buttonStyle(SignalPillButtonStyle())
                 Button("Done") {
                     dismiss()
                 }
+                .buttonStyle(SignalPillButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 16)
+            .animation(Signal.quick, value: isCopied)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 20)
         }
         .frame(minWidth: 640, minHeight: 520)
     }
@@ -473,18 +524,13 @@ private enum HistoryLabels {
 
 private struct GeneralSettingsPane: View {
     @ObservedObject var engine: DictationEngine
-    @State private var isConfirmingLocalCleanup = false
-    @State private var isConfirmingLocalRemoval = false
     @State private var recordingHotkey: HotkeyAction?
     @State private var hotkeyError: String?
 
     var body: some View {
-        SettingsPaneContainer(
-            title: "General",
-            subtitle: "Processing, shortcuts, audio routing, and background behavior"
-        ) {
+        SettingsPaneContainer {
             Form {
-                Section {
+                Section("Dictation") {
                     Picker(
                         "Mode",
                         selection: Binding(
@@ -499,116 +545,43 @@ private struct GeneralSettingsPane: View {
                     .pickerStyle(.segmented)
                     .disabled(engine.activity != .idle)
 
-                    Text(engine.dictationModeDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Picker(
+                        "Pro engine",
+                        selection: Binding(
+                            get: { engine.proModeEngine },
+                            set: { engine.setProModeEngine($0) }
+                        )
+                    ) {
+                        ForEach(ProModeEngine.allCases) { proEngine in
+                            Text(proEngine.title).tag(proEngine)
+                        }
+                    }
+                    .disabled(engine.activity != .idle)
+                    .help(engine.proModeEngine.detail)
 
                     Toggle(
-                        "Use nearby text as context in Pro Mode",
+                        "Use nearby text in Pro Mode",
                         isOn: Binding(
                             get: { engine.proContextEnabled },
                             set: { engine.setProContextEnabled($0) }
                         )
                     )
                     .disabled(engine.activity != .idle)
+                    .help(proContextExplanation)
 
-                    Text("Accessibility text is read once after recording starts. Fast Mode never reads or sends context. Screenshots are never captured.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Toggle("Add a space after dictation", isOn: $engine.appendTrailingSpace)
 
-                    if engine.dictationMode == .pro {
-                        LabeledContent("Last context capture") {
-                            Text(
-                                engine.proContextEnabled
-                                    ? (engine.lastContextSummary ?? "Not captured yet")
-                                    : "Turned off"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.trailing)
+                    if engine.isRetiredProModelDownloaded {
+                        LabeledContent("Unused Gemma model (4.6 GB)") {
+                            Button("Remove") {
+                                engine.removeRetiredProModelDownload()
+                            }
+                            .disabled(engine.activity != .idle)
                         }
                     }
-                } header: {
-                    DottedSectionLabel("Processing")
                 }
 
-                Section {
-                    Picker(
-                        "Cleanup provider",
-                        selection: Binding(
-                            get: { engine.proCleanupProvider },
-                            set: { provider in
-                                if provider == .local,
-                                   engine.proCleanupProvider != .local {
-                                    isConfirmingLocalCleanup = true
-                                } else {
-                                    engine.setProCleanupProvider(provider)
-                                }
-                            }
-                        )
-                    ) {
-                        ForEach(ProCleanupProvider.allCases) { provider in
-                            Text(provider.title).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(engine.activity != .idle)
-
-                    Text(engine.proCleanupProvider.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if engine.proCleanupProvider == .local {
-                        LabeledContent(LocalProModel.displayName) {
-                            Text(localModelStatus)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if case let .downloading(progress) = engine.localProModelState {
-                            ProgressView(value: progress)
-                                .accessibilityLabel("Downloading local cleanup model")
-                        }
-
-                        Label(
-                            "Uses \(LocalProModel.diskUsageLabel) of storage and \(LocalProModel.memoryUsageLabel) while loaded.",
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-
-                        Text("WhisprGo keeps it loaded throughout Pro Mode. After you leave Pro Mode, it unloads after \(LocalProModel.unloadDelayLabel) of inactivity.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        HStack {
-                            Link("View MLX model", destination: LocalProModel.mlxSourceURL)
-                            Link("Original GGUF", destination: LocalProModel.sourceURL)
-
-                            if case .failed = engine.localProModelState {
-                                Button("Try Again") {
-                                    engine.prepareLocalProModel()
-                                }
-                            }
-                        }
-                    } else if engine.isLocalProModelDownloaded {
-                        HStack {
-                            Text("Local Gemma download")
-                            Spacer()
-                            Text(LocalProModel.diskUsageLabel)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Button("Remove Download", role: .destructive) {
-                                isConfirmingLocalRemoval = true
-                            }
-                            .disabled(!engine.canRemoveLocalProModel)
-                        }
-                    }
-                } header: {
-                    DottedSectionLabel("Pro Cleanup")
-                }
-
-                Section {
+                Section("Shortcuts") {
                     ForEach(HotkeyAction.allCases) { action in
                         HotkeyRecorderRow(
                             action: action,
@@ -622,15 +595,11 @@ private struct GeneralSettingsPane: View {
                     }
 
                     if let hotkeyError {
-                        Label(hotkeyError, systemImage: "exclamationmark.triangle.fill")
+                        Label(hotkeyError, systemImage: "exclamationmark.triangle")
                             .font(.caption)
-                            .foregroundStyle(.orange)
                     }
 
                     HStack {
-                        Text("Changes take effect immediately.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                         Spacer()
                         Button("Restore Defaults") {
                             cancelHotkeyRecording()
@@ -641,122 +610,106 @@ private struct GeneralSettingsPane: View {
                             engine.hotkeyConfiguration == .default || engine.activity != .idle
                         )
                     }
-                } header: {
-                    DottedSectionLabel("Shortcuts")
-                } footer: {
-                    Text("Click a shortcut, then press the new combination. Press Escape to cancel. Ordinary typing keys need a modifier.")
                 }
 
-                Section {
-                    Toggle("Add a space after each dictation", isOn: $engine.appendTrailingSpace)
-                } header: {
-                    DottedSectionLabel("Dictation")
-                }
+                Section("Microphone") {
+                    LabeledContent("Current input") {
+                        Text(engine.microphoneRouteDescription)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .help("The Mac microphone is preferred. Bluetooth headset microphones are ignored. Allow an external microphone below to prefer it while connected.")
 
-                Section {
-                    Toggle(
-                        "Launch WhisprGo at login",
-                        isOn: Binding(
-                            get: { engine.launchAtLogin },
-                            set: { engine.setLaunchAtLogin($0) }
+                    ForEach(externalMicrophoneRoutes) { route in
+                        Toggle(
+                            route.isBluetooth ? "\(route.name) (Bluetooth)" : "Prefer \(route.name)",
+                            isOn: Binding(
+                                get: {
+                                    !route.isBluetooth
+                                        && engine.allowedExternalMicrophoneUIDs.contains(route.uid)
+                                },
+                                set: { engine.setExternalMicrophoneAllowed(route, allowed: $0) }
+                            )
                         )
-                    )
-                    Text("WhisprGo stays available from the menu bar.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    DottedSectionLabel("Background")
-                }
+                        .disabled(route.isBluetooth || engine.activity != .idle)
+                        .help(route.isBluetooth ? "Bluetooth microphones are ignored." : route.transport.label)
+                    }
 
-                Section {
+                    ForEach(disconnectedMicrophoneUIDs, id: \.self) { uid in
+                        LabeledContent("\(engine.knownExternalMicrophoneNames[uid] ?? "External microphone") (disconnected)") {
+                            Button("Forget") {
+                                engine.removeDisconnectedMicrophoneException(uid)
+                            }
+                            .disabled(engine.activity != .idle)
+                        }
+                    }
+
                     Toggle(
-                        "Use the Mac microphone instead of AirPods",
-                        isOn: Binding(
-                            get: { engine.preferBuiltInMicrophone },
-                            set: { engine.setPreferBuiltInMicrophone($0) }
-                        )
-                    )
-                    .disabled(engine.activity != .idle)
-
-                    Text("On by default. Input is currently \(engine.microphoneRouteDescription), leaving AirPods available for high-quality playback.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    DottedSectionLabel("Audio Input")
-                }
-
-                Section {
-                    Toggle(
-                        "Keep microphone active between dictations",
+                        "Keep microphone ready",
                         isOn: Binding(
                             get: { engine.keepMicrophoneActive },
                             set: { engine.setKeepMicrophoneActive($0) }
                         )
                     )
                     .disabled(engine.activity != .idle)
-
-                    Text("Off by default. When enabled, idle audio is discarded immediately and is never saved or transcribed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    DottedSectionLabel("Instant Response")
-                }
-
-                Section {
-                    PermissionRow(title: "Microphone", isGranted: engine.permissions.microphone)
-                    PermissionRow(title: "Accessibility", isGranted: engine.permissions.accessibility)
+                    .help("Faster start. Idle audio is discarded immediately and is never saved or transcribed.")
 
                     HStack {
-                        Button("Request Permissions") {
-                            engine.requestPermissions()
-                        }
-                        Button("Open Microphone") {
-                            engine.openMicrophoneSettings()
-                        }
-                        Button("Open Accessibility") {
-                            engine.openAccessibilitySettings()
-                        }
-                        Button("Check Again") {
-                            engine.refreshPermissions()
+                        Spacer()
+                        Button("Refresh Devices") {
+                            engine.refreshMicrophoneRoutes()
                         }
                     }
-                } header: {
-                    DottedSectionLabel("Permissions")
+                }
+
+                Section("System") {
+                    Toggle(
+                        "Launch at login",
+                        isOn: Binding(
+                            get: { engine.launchAtLogin },
+                            set: { engine.setLaunchAtLogin($0) }
+                        )
+                    )
+                    PermissionRow(
+                        title: "Microphone",
+                        isGranted: engine.permissions.microphone,
+                        open: allowMicrophone
+                    )
+                    PermissionRow(
+                        title: "Accessibility",
+                        isGranted: engine.permissions.accessibility,
+                        open: allowAccessibility
+                    )
                 }
 
                 if let error = engine.lastError {
                     Section {
-                        HStack(alignment: .top, spacing: 9) {
-                            DotSelectionIndicator(isSelected: false)
-                            Text(error)
-                                .font(.callout)
-                        }
+                        Label(error, systemImage: "exclamationmark.circle")
+                            .textSelection(.enabled)
                     }
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
         .onDisappear {
             if recordingHotkey != nil {
                 cancelHotkeyRecording()
             }
         }
-        .alert("Use local Pro cleanup beta?", isPresented: $isConfirmingLocalCleanup) {
-            Button("Cancel", role: .cancel) {}
-            Button(engine.isLocalProModelDownloaded ? "Use Beta" : "Download Beta & Use") {
-                engine.setProCleanupProvider(.local)
-            }
-        } message: {
-            Text("This beta uses Gemma 4 E2B. It needs \(LocalProModel.diskUsageLabel) of storage and may use \(LocalProModel.memoryUsageLabel) while Pro Mode is active. The model and cleanup text stay on this Mac.")
+    }
+
+    private func allowMicrophone() {
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            engine.requestPermissions()
+        } else {
+            engine.openMicrophoneSettings()
         }
-        .alert("Remove local cleanup model?", isPresented: $isConfirmingLocalRemoval) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove Download", role: .destructive) {
-                engine.removeLocalProModelDownload()
-            }
-        } message: {
-            Text("This frees \(LocalProModel.diskUsageLabel) of storage. Choosing On Device (Beta) again downloads the model automatically.")
-        }
+    }
+
+    private func allowAccessibility() {
+        // Prompting first adds WhisprGo to the Accessibility list.
+        engine.requestPermissions()
+        engine.openAccessibilitySettings()
     }
 
     private func beginRecording(_ action: HotkeyAction) {
@@ -788,14 +741,24 @@ private struct GeneralSettingsPane: View {
         engine.endRecordingHotkey()
     }
 
-    private var localModelStatus: String {
-        switch engine.localProModelState {
-        case .notDownloaded: return "Waiting to download"
-        case let .downloading(progress): return "Downloading \(Int(progress * 100))%"
-        case .loading: return "Loading with MLX"
-        case .ready: return "Loaded for Pro Mode"
-        case .downloaded: return "Downloaded · unloaded"
-        case .failed: return "Needs attention"
+    private var externalMicrophoneRoutes: [AudioInputRoute] {
+        engine.microphoneRoutes.filter { !$0.isBuiltIn }
+    }
+
+    private var disconnectedMicrophoneUIDs: [String] {
+        let connected = Set(engine.microphoneRoutes.map(\.uid))
+        return engine.allowedExternalMicrophoneUIDs
+            .subtracting(connected)
+            .sorted { (engine.knownExternalMicrophoneNames[$0] ?? $0)
+                < (engine.knownExternalMicrophoneNames[$1] ?? $1) }
+    }
+
+    private var proContextExplanation: String {
+        switch engine.proModeEngine {
+        case .instruct:
+            return "Accessibility text is read once after recording starts and sent with the raw transcript to Instruct Pro for names, tone, formatting, and cursor continuity. Fast Mode never reads this context, and screenshots are never captured."
+        case .geminiTranscribe:
+            return "Accessibility text is read once after recording starts. Relevant names and technical terms are sent to Gemini as vocabulary hints. Fast Mode never reads this context, and screenshots are never captured."
         }
     }
 }
@@ -807,15 +770,10 @@ private struct ProfileSettingsPane: View {
     @State private var draftPrompt = ""
 
     var body: some View {
-        SettingsPaneContainer(
-            title: "Pro Profiles",
-            subtitle: "Custom cleanup rules for different kinds of writing"
-        ) {
+        SettingsPaneContainer {
             HStack(spacing: 0) {
                 profileList
-                    .frame(width: 190)
-
-                Divider()
+                    .frame(width: 180)
 
                 profileEditor
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -829,76 +787,69 @@ private struct ProfileSettingsPane: View {
 
     private var profileList: some View {
         VStack(alignment: .leading, spacing: 10) {
-            DottedSectionLabel("Profiles")
-
             ScrollView {
-                LazyVStack(spacing: 5) {
+                LazyVStack(spacing: 2) {
                     ForEach(store.profiles) { profile in
                         Button {
                             select(profile.id)
                         } label: {
-                            HStack(spacing: 9) {
-                                DotSelectionIndicator(
-                                    isSelected: profile.id == store.selectedProfileID
-                                )
+                            HStack {
                                 Text(profile.name)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 Spacer(minLength: 0)
                             }
-                            .padding(.horizontal, 9)
-                            .frame(height: 34)
+                            .font(.system(
+                                size: 13,
+                                weight: profile.id == store.selectedProfileID ? .semibold : .regular
+                            ))
+                            .padding(.horizontal, 10)
+                            .frame(height: 30)
                             .contentShape(Rectangle())
                             .background(
-                                Color.primary.opacity(
-                                    profile.id == store.selectedProfileID ? 0.06 : 0
-                                ),
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                profile.id == store.selectedProfileID
+                                    ? Signal.surfaceHover
+                                    : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
                             )
+                            .animation(Signal.quick, value: store.selectedProfileID)
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
 
-            HStack {
+            HStack(spacing: 4) {
                 Button {
                     saveDraftIfPossible()
                     _ = store.create()
                 } label: {
-                    Label("Add", systemImage: "plus")
+                    Image(systemName: "plus")
                 }
-                .buttonStyle(.borderless)
-
-                Spacer()
+                .help("New profile")
+                .accessibilityLabel("New profile")
 
                 Button(role: .destructive) {
                     store.remove(store.selectedProfileID)
                 } label: {
-                    Image(systemName: "trash")
+                    Image(systemName: "minus")
                 }
-                .buttonStyle(.borderless)
                 .disabled(store.profiles.count <= 1)
                 .help("Delete profile")
                 .accessibilityLabel("Delete selected profile")
             }
+            .buttonStyle(.borderless)
         }
-        .padding(16)
+        .padding(.leading, 20)
+        .padding(.trailing, 8)
+        .padding(.vertical, 12)
     }
 
     private var profileEditor: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack {
-                DottedSectionLabel("Selected Profile")
-                Spacer()
-                MinimalBadge("Pro only")
-            }
-
+        VStack(alignment: .leading, spacing: 10) {
             TextField("Profile name", text: $draftName)
-                .textFieldStyle(.roundedBorder)
-
-            Text("Custom instructions")
-                .font(.callout.weight(.medium))
+                .textFieldStyle(.plain)
+                .font(.system(size: 17, weight: .semibold))
 
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $draftPrompt)
@@ -907,7 +858,7 @@ private struct ProfileSettingsPane: View {
                     .padding(7)
 
                 if draftPrompt.isEmpty {
-                    Text("Example: Keep emails concise and warm. Preserve greetings and sign-offs.")
+                    Text(profilePlaceholder)
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 12)
@@ -916,43 +867,66 @@ private struct ProfileSettingsPane: View {
                 }
             }
             .background(
-                Color.primary.opacity(0.025),
+                Signal.surface,
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.primary.opacity(0.14), lineWidth: 1)
+                    .strokeBorder(Signal.hairline, lineWidth: 1)
             }
-            .frame(minHeight: 190)
+            .frame(maxHeight: .infinity)
+            .help(profileGuidance)
 
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Cycle while in Pro Mode")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HotkeyCapsView(
-                        shortcut: engine.hotkeyConfiguration[.cycleProfile],
-                        compact: true
-                    )
-                }
+            HStack(spacing: 10) {
+                Text(profileCounter)
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(Signal.textTertiary)
+                    .contentTransition(.numericText())
 
                 Spacer()
 
-                Text("\(draftPrompt.count) / 12,000")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-
-                Button("Save Profile", action: saveDraftIfPossible)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.primary)
+                Button("Save", action: saveDraftIfPossible)
+                    .buttonStyle(SignalPillButtonStyle(prominent: true))
                     .disabled(!isDirty || cleanDraftName.isEmpty)
+                    .keyboardShortcut("s", modifiers: .command)
             }
         }
-        .padding(18)
+        .padding(.leading, 12)
+        .padding(.trailing, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 20)
     }
 
     private var cleanDraftName: String {
         draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var profileGuidance: String {
+        switch engine.proModeEngine {
+        case .instruct:
+            return "Instruct Pro applies these trusted writing instructions after transcription. Nearby text can also guide names, tone, formatting, and how the text continues at the cursor."
+        case .geminiTranscribe:
+            return "Enter names, product terms, acronyms, or short phrases separated by commas or new lines. Gemini uses up to 100 terms from this profile plus nearby text."
+        }
+    }
+
+    private var profilePlaceholder: String {
+        switch engine.proModeEngine {
+        case .instruct:
+            return "Writing instructions, e.g. Keep emails concise and warm."
+        case .geminiTranscribe:
+            return "Names and terms, one per line"
+        }
+    }
+
+    private var profileCounter: String {
+        switch engine.proModeEngine {
+        case .instruct:
+            return "\(draftPrompt.count) / 12,000"
+        case .geminiTranscribe:
+            return "\(GeminiVocabulary.terms(profileText: draftPrompt, context: nil).count) / 100 terms"
+        }
     }
 
     private var isDirty: Bool {
@@ -987,26 +961,23 @@ private struct ModelSettingsPane: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        SettingsPaneContainer(
-            title: "Models",
-            subtitle: "Local-first by default, cloud-ready when you need it"
-        ) {
+        SettingsPaneContainer {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
+                LazyVStack(alignment: .leading, spacing: 20) {
                     ModelSection(
-                        title: "On Device",
-                        subtitle: "Private, offline, and accelerated by Apple silicon.",
+                        title: "On device",
                         models: ModelCatalog.local,
                         engine: engine
                     )
                     ModelSection(
                         title: "OpenAI",
-                        subtitle: "Uses your API key. Audio is sent only after you finish speaking.",
                         models: ModelCatalog.cloud,
                         engine: engine
                     )
                 }
-                .padding(18)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
+                .padding(.bottom, 20)
             }
         }
     }
@@ -1014,19 +985,26 @@ private struct ModelSettingsPane: View {
 
 private struct ModelSection: View {
     let title: String
-    let subtitle: String
     let models: [TranscriptionModel]
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             DottedSectionLabel(title)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
 
-            ForEach(models) { model in
-                ModelRow(model: model, engine: engine)
+            VStack(spacing: 0) {
+                ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
+                    if index > 0 {
+                        Divider().padding(.leading, 40)
+                    }
+                    ModelRow(model: model, engine: engine)
+                }
+            }
+            .background(Signal.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Signal.hairline, lineWidth: 1)
             }
         }
     }
@@ -1043,74 +1021,48 @@ private struct ModelRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 8) {
             Button {
                 engine.selectModel(model.id)
             } label: {
                 HStack(spacing: 12) {
                     DotSelectionIndicator(isSelected: isSelected)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 7) {
-                            Text(model.name)
-                                .font(.body.weight(.medium))
-                            if model.recommended {
-                                MinimalBadge("Default", filled: isSelected)
-                            }
-                        }
-                        Text(model.detail)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
+                    Text(model.name)
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     Spacer()
-
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(model.sizeLabel ?? "API")
-                            .font(.caption.monospacedDigit())
-                        Text(status(for: model))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    if let status {
+                        Text(status)
+                            .foregroundStyle(Signal.textSecondary)
                     }
+                    Text(model.sizeLabel ?? "API")
+                        .monospacedDigit()
+                        .foregroundStyle(Signal.textTertiary)
                 }
-                .padding(12)
+                .font(.system(size: 12))
+                .padding(.vertical, 10)
+                .padding(.leading, 12)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!engine.canChangeModel)
-            .accessibilityLabel("\(model.name), \(status(for: model))")
+            .help(model.detail)
+            .accessibilityLabel("\(model.name)\(status.map { ", \($0)" } ?? "")")
 
-            if isDownloaded {
-                VStack(alignment: .trailing, spacing: 3) {
-                    Button {
-                        isConfirmingRemoval = true
-                    } label: {
-                        Label("Remove", systemImage: "trash")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(!engine.canRemoveDownloadedModel(model.id))
-
-                    if isSelected {
-                        Text("Switch model first")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .padding(.trailing, 12)
+            Button {
+                isConfirmingRemoval = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Signal.textSecondary)
             }
+            .buttonStyle(.borderless)
+            .disabled(!isDownloaded || !engine.canRemoveDownloadedModel(model.id))
+            .opacity(isDownloaded ? 1 : 0)
+            .help(isSelected ? "Switch to another model to remove this one" : "Remove download")
+            .accessibilityHidden(!isDownloaded)
+            .padding(.trailing, 12)
         }
-        .background(
-            Color.primary.opacity(isSelected ? 0.055 : 0.012),
-            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(
-                    Color.primary.opacity(isSelected ? 0.52 : 0.12),
-                    lineWidth: 1
-                )
-        }
+        .animation(Signal.motion, value: isSelected)
         .alert("Remove \(model.name)?", isPresented: $isConfirmingRemoval) {
             Button("Cancel", role: .cancel) {}
             Button("Remove Download", role: .destructive) {
@@ -1121,164 +1073,161 @@ private struct ModelRow: View {
         }
     }
 
-    private func status(for model: TranscriptionModel) -> String {
+    /// Only states worth reading; "downloads on selection" is the default.
+    private var status: String? {
         if model.isLocal {
             if isSelected {
                 switch engine.modelState {
                 case let .downloading(progress):
-                    return "Downloading \(Int(progress * 100))%"
-                case .warming:
+                    return "\(Int(progress * 100))%"
+                case .warming, .starting:
                     return "Loading"
-                case .ready:
-                    return "In use"
                 case .failed:
                     return "Needs attention"
-                case .starting:
-                    return "Starting"
-                case .needsAPIKey:
-                    break
+                case .ready, .needsAPIKey:
+                    return nil
                 }
             }
-            return isDownloaded ? "Downloaded" : "Downloads on selection"
+            return isDownloaded ? "Downloaded" : nil
         }
-        return engine.openAIKeyConfigured ? "Key configured" : "Key needed"
+        return engine.openAIKeyConfigured ? nil : "Needs key"
     }
 }
 
 private struct ProviderSettingsPane: View {
     @ObservedObject var engine: DictationEngine
-    @State private var apiKey = ""
-    @State private var didSave = false
+    @State private var googleAPIKey = ""
+    @State private var openAIAPIKey = ""
+    @State private var savedProvider: String?
 
     var body: some View {
-        SettingsPaneContainer(
-            title: "Providers",
-            subtitle: "Cloud transcription and Pro Mode, stored securely"
-        ) {
+        SettingsPaneContainer {
             Form {
-                Section {
-                    HStack(spacing: 14) {
-                        BrandWaveform()
-                            .frame(width: 74, height: 41)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("OpenAI")
-                                .font(.headline)
-                            Text(engine.openAIKeyConfigured ? "API key configured" : "No API key saved")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                Section("Google Gemini") {
+                    ProviderKeyRow(
+                        placeholder: "Paste from Google AI Studio",
+                        key: $googleAPIKey,
+                        isConfigured: engine.googleAPIKeyConfigured,
+                        didSave: savedProvider == "google",
+                        onSave: saveGoogleKey,
+                        onRemove: {
+                            if engine.saveGoogleAPIKey("") { googleAPIKey = "" }
                         }
-                        Spacer()
-                        MinimalBadge(
-                            engine.openAIKeyConfigured ? "Ready" : "Optional",
-                            filled: engine.openAIKeyConfigured
-                        )
-                    }
+                    )
+                }
+
+                Section("OpenAI") {
+                    ProviderKeyRow(
+                        placeholder: "Paste from OpenAI",
+                        key: $openAIAPIKey,
+                        isConfigured: engine.openAIKeyConfigured,
+                        didSave: savedProvider == "openai",
+                        onSave: saveOpenAIKey,
+                        onRemove: {
+                            if engine.saveOpenAIAPIKey("") { openAIAPIKey = "" }
+                        }
+                    )
                 }
 
                 Section {
-                    SecureField("sk-…", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(save)
-
-                    HStack {
-                        Button("Save in Keychain", action: save)
-                            .buttonStyle(.borderedProminent)
-                            .tint(.primary)
-                            .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if engine.openAIKeyConfigured {
-                            Button("Remove Key", role: .destructive) {
-                                if engine.saveOpenAIAPIKey("") {
-                                    apiKey = ""
-                                }
-                            }
-                        }
-
-                        if didSave {
-                            MinimalBadge("Saved", filled: true)
-                        }
-                    }
-                } header: {
-                    DottedSectionLabel("API Key")
-                }
-
-                Section {
-                    Text("The key is stored in macOS Keychain. Fast Mode with a local model sends nothing to OpenAI. Pro Mode sends the raw transcript and, when enabled, bounded Accessibility text to GPT-5.6 Luna only when OpenAI is selected as the cleanup provider. The On Device beta keeps both on this Mac. WhisprGo never captures screenshots.")
-                        .font(.callout)
+                    Text("Keys are stored in macOS Keychain. Fast Mode with a local model stays on this Mac. Instruct Pro sends its transcript and enabled nearby text to OpenAI. Gemini Pro uploads the recording to Google with vocabulary hints and requests deletion afterwards. WhisprGo never captures screenshots.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
-                    DottedSectionLabel("Privacy")
+                    Text("Privacy")
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
         }
     }
 
-    private func save() {
-        if engine.saveOpenAIAPIKey(apiKey) {
-            apiKey = ""
-            didSave = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                didSave = false
+    private func saveGoogleKey() {
+        if engine.saveGoogleAPIKey(googleAPIKey) {
+            googleAPIKey = ""
+            showSaved("google")
+        }
+    }
+
+    private func saveOpenAIKey() {
+        if engine.saveOpenAIAPIKey(openAIAPIKey) {
+            openAIAPIKey = ""
+            showSaved("openai")
+        }
+    }
+
+    private func showSaved(_ provider: String) {
+        savedProvider = provider
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if savedProvider == provider {
+                savedProvider = nil
             }
         }
     }
 }
 
+private struct ProviderKeyRow: View {
+    let placeholder: String
+    @Binding var key: String
+    let isConfigured: Bool
+    let didSave: Bool
+    let onSave: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SecureField(
+                "API key",
+                text: $key,
+                prompt: Text(isConfigured ? "Saved in Keychain" : placeholder)
+            )
+            .textFieldStyle(.roundedBorder)
+            .onSubmit(onSave)
+
+            if didSave {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Signal.textSecondary)
+                    .transition(.blurReplace)
+                    .accessibilityLabel("Saved")
+            }
+
+            if !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("Save", action: onSave)
+            } else if isConfigured {
+                Button("Remove", role: .destructive, action: onRemove)
+            }
+        }
+        .animation(Signal.quick, value: didSave)
+    }
+}
+
+/// The pane body beneath the shell's title.
 private struct SettingsPaneContainer<Content: View>: View {
-    let title: String
-    let subtitle: String
     private let content: Content
 
-    init(
-        title: String,
-        subtitle: String,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.title = title
-        self.subtitle = subtitle
+    init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                BrandWaveform()
-                    .frame(width: 76, height: 42)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 20, weight: .medium))
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 11)
-
-            DottedRule()
-                .padding(.horizontal, 20)
-
-            content
-        }
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
 private struct PermissionRow: View {
     let title: String
     let isGranted: Bool
+    let open: () -> Void
 
     var body: some View {
-        HStack {
-            Text(title)
-            Spacer()
-            HStack(spacing: 7) {
-                DotSelectionIndicator(isSelected: isGranted)
-                Text(isGranted ? "Allowed" : "Required")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        LabeledContent(title) {
+            if isGranted {
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Signal.textSecondary)
+                    .accessibilityLabel("Allowed")
+            } else {
+                Button("Allow…", action: open)
             }
         }
     }
