@@ -16,7 +16,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
-            exact: "0.15.5"
+            exact: "0.17.5"
         ),
         .package(
             url: "https://github.com/sparkle-project/Sparkle",
