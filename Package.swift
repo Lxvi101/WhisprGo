@@ -20,7 +20,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/sparkle-project/Sparkle",
-            exact: "2.9.2"
+            exact: "2.10.0"
         ),
         .package(
             url: "https://github.com/ml-explore/mlx-swift",
