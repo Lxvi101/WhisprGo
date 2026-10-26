@@ -64,10 +64,12 @@ Keep the tag in the form `v<CFBundleShortVersionString>`. Before packaging, run:
 ```sh
 plutil -lint Packaging/Info.plist
 plutil -lint Packaging/WhisprGo.entitlements
-zsh -n Scripts/build-app.sh Scripts/build-dmg.sh Scripts/build-release.sh Scripts/generate-appcast.sh
+zsh -n Scripts/build-app.sh Scripts/build-dmg.sh Scripts/build-release.sh Scripts/generate-appcast.sh Scripts/build-mlx-metallib.sh
 git diff --check
-swift test --configuration release
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --configuration release
 ```
+
+The Command Line Tools toolchain has no XCTest, so tests use Xcode's toolchain. `PhononTests.testTranscriptsMatchFermionReferenceRuntime` is skipped unless `PHONON_TEST_ARCHIVES` and `PHONON_TEST_AUDIO` point at the published archives and reference audio, and `mlx.metallib` from `.build/mlx-metallib/` is copied next to the test binary.
 
 Do not run performance benchmarks unless the user requests them. A code-review performance audit is separate from release correctness checks.
 
@@ -91,6 +93,8 @@ Override these only when the stored identity/profile genuinely changed. The scri
 3. Build and sign the DMG from that stapled app.
 4. Notarize and staple the DMG.
 5. Verify the signatures and Gatekeeper assessments.
+
+Phonon 2.5, the default on-device model, runs on MLX. SwiftPM does not compile MLX's Metal kernels, so `Scripts/build-app.sh` calls `Scripts/build-mlx-metallib.sh`, which needs Xcode's Metal toolchain (it falls back to `/Applications/Xcode.app` when `xcode-select` points at the Command Line Tools). The result ships as `Contents/Resources/mlx-swift_Cmlx.bundle/Contents/Resources/default.metallib`; the script signs that bundle before the app. Without it the app launches but Phonon fails to load.
 
 Expected output for version `X.Y.Z`:
 

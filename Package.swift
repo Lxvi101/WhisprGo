@@ -22,6 +22,14 @@ let package = Package(
             url: "https://github.com/sparkle-project/Sparkle",
             exact: "2.9.2"
         ),
+        .package(
+            url: "https://github.com/ml-explore/mlx-swift",
+            exact: "0.32.3"
+        ),
+        .package(
+            url: "https://github.com/facebook/zstd",
+            exact: "1.5.7"
+        ),
     ],
     targets: [
         .executableTarget(
@@ -31,6 +39,9 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "libzstd", package: "zstd"),
             ],
             path: "Sources/WhisprGo",
             linkerSettings: [

@@ -28,6 +28,29 @@ for RESOURCE_BUNDLE in "$BIN_DIR"/*.bundle(N); do
     ditto "$RESOURCE_BUNDLE" "$CONTENTS_DIR/Resources/${RESOURCE_BUNDLE:t}"
 done
 
+# Phonon runs on MLX, whose Metal kernels SwiftPM does not compile. Ship them
+# as default.metallib inside the resource bundle MLX searches for.
+MLX_METALLIB="$(zsh "$SCRIPT_DIR/build-mlx-metallib.sh")"
+MLX_BUNDLE="$CONTENTS_DIR/Resources/mlx-swift_Cmlx.bundle"
+mkdir -p "$MLX_BUNDLE/Contents/Resources"
+cp "$MLX_METALLIB" "$MLX_BUNDLE/Contents/Resources/default.metallib"
+cat > "$MLX_BUNDLE/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.whisprgo.app.mlx-metal</string>
+    <key>CFBundleName</key>
+    <string>mlx-swift_Cmlx</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+</dict>
+</plist>
+PLIST
+
 if [[ ! -d "$SPARKLE_SOURCE" ]]; then
     print -u2 "Missing Sparkle.framework. Run 'swift package resolve' first."
     exit 1
@@ -61,6 +84,7 @@ fi
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FRAMEWORK/Versions/B/Autoupdate"
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FRAMEWORK/Versions/B/Updater.app"
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FRAMEWORK"
+codesign "${SIGN_ARGS[@]}" "$MLX_BUNDLE"
 codesign "${SIGN_ARGS[@]}" \
     --entitlements "$PROJECT_DIR/Packaging/WhisprGo.entitlements" \
     "$APP_DIR"

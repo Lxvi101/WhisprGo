@@ -99,6 +99,26 @@ enum ModelCache {
         cachedFolder(for: modelID) != nil
     }
 
+    /// Bytes a model's downloads occupy on disk, or nil when nothing is stored.
+    static func downloadedBytes(for modelID: String) -> Int64? {
+        guard let path = UserDefaults.standard.string(forKey: storagePrefix + modelID)
+            ?? cachedFolder(for: modelID)?.path
+        else { return nil }
+        let keys: Set<URLResourceKey> = [.totalFileAllocatedSizeKey, .isRegularFileKey]
+        guard let enumerator = FileManager.default.enumerator(
+            at: URL(fileURLWithPath: path, isDirectory: true),
+            includingPropertiesForKeys: Array(keys)
+        ) else { return nil }
+        var total: Int64 = 0
+        for case let file as URL in enumerator {
+            guard let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true
+            else { continue }
+            total += Int64(values.totalFileAllocatedSize ?? 0)
+        }
+        return total > 0 ? total : nil
+    }
+
     static func removeDownload(for modelID: String) throws {
         let root = try modelsRoot().standardizedFileURL
         let defaults = UserDefaults.standard

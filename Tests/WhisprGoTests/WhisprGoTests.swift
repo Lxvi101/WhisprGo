@@ -36,8 +36,10 @@ final class WhisprGoTests: XCTestCase {
 
     func testModelCatalogHasUniqueIDsAndValidDefault() {
         XCTAssertEqual(Set(ModelCatalog.all.map(\.id)).count, ModelCatalog.all.count)
-        XCTAssertEqual(ModelCatalog.model(id: ModelCatalog.defaultModelID).id, "local.parakeet.v3")
-        XCTAssertEqual(ModelCatalog.model(id: ModelCatalog.defaultModelID).name, "Parakeet TDT 0.6B v3")
+        XCTAssertEqual(ModelCatalog.model(id: ModelCatalog.defaultModelID).id, "local.phonon.2.5")
+        XCTAssertEqual(ModelCatalog.model(id: ModelCatalog.defaultModelID).name, "Phonon 2.5")
+        XCTAssertEqual(ModelCatalog.featured.map(\.id), ["local.phonon.2.5", "local.phonon.2.5.en"])
+        XCTAssertEqual(ModelCatalog.model(id: "local.parakeet.v3").tier, .legacy)
         XCTAssertTrue(ModelCatalog.all.contains(where: { !$0.isLocal }))
     }
 
@@ -407,6 +409,7 @@ final class WhisprGoTests: XCTestCase {
         configuration.protocolClasses = [ProModeURLProtocol.self]
         let session = URLSession(configuration: configuration)
         var requests = [URLRequest]()
+        let deletion = expectation(description: "Uploaded file deleted asynchronously")
 
         ProModeURLProtocol.handler = { request in
             requests.append(request)
@@ -453,6 +456,7 @@ final class WhisprGoTests: XCTestCase {
                 return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
             case "/v1beta/files/test-file":
                 XCTAssertEqual(request.httpMethod, "DELETE")
+                deletion.fulfill()
                 return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data("{}".utf8))
             default:
                 throw URLError(.unsupportedURL)
@@ -468,6 +472,7 @@ final class WhisprGoTests: XCTestCase {
             customVocabulary: ["WhisprGo", "RØDE"]
         )
         XCTAssertEqual(output, "I took the taxi.")
+        await fulfillment(of: [deletion], timeout: 2)
         XCTAssertEqual(requests.count, 4)
     }
 

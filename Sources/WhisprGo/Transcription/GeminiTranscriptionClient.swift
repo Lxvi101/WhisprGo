@@ -36,18 +36,18 @@ final class GeminiTranscriptionClient {
     ) async throws -> String {
         let wav = WAVEncoder.encode(samples: samples)
         let file = try await upload(wav)
-
-        do {
-            let output = try await createInteraction(
-                file: file,
-                customVocabulary: Array(customVocabulary.prefix(100))
-            )
-            await delete(file)
-            return output
-        } catch {
-            await delete(file)
-            throw error
+        defer {
+            // Cleanup is still attempted on success, failure, and cancellation,
+            // but a slow DELETE must not hold back finished text. Detached so
+            // cancellation of dictation does not cancel deletion as well.
+            Task.detached(priority: .utility) { [self] in
+                await delete(file)
+            }
         }
+        return try await createInteraction(
+            file: file,
+            customVocabulary: Array(customVocabulary.prefix(100))
+        )
     }
 
     private func upload(_ data: Data) async throws -> GeminiFile {

@@ -40,6 +40,7 @@ final class DictationEngine: ObservableObject {
     @Published private(set) var modelState: ModelState = .starting
     @Published private(set) var permissions = Permissions()
     @Published private(set) var lastLatency: TimeInterval?
+    @Published private(set) var lastLatencyBreakdown: DictationLatency?
     @Published private(set) var lastError: String?
     @Published private(set) var openAIKeyConfigured = KeychainStore.openAIAPIKey() != nil
     @Published private(set) var googleAPIKeyConfigured = KeychainStore.googleAPIKey() != nil
@@ -51,6 +52,7 @@ final class DictationEngine: ObservableObject {
     @Published private(set) var dictationMode: DictationMode
     @Published private(set) var proModeEngine: ProModeEngine
     @Published private(set) var proContextEnabled: Bool
+    @Published private(set) var prepareProDuringRecording: Bool
     @Published private(set) var lastContextSummary: String?
     @Published private(set) var hotkeyConfiguration: HotkeyConfiguration
 
@@ -78,8 +80,15 @@ final class DictationEngine: ObservableObject {
     private static let dictationModeKey = "dictationMode"
     private static let proModeEngineKey = "proModeEngine"
     private static let proContextEnabledKey = "proContextEnabled"
+    private static let prepareProDuringRecordingKey = "prepareProDuringRecording"
     private static let defaultModelVersionKey = "defaultModelVersion"
-    private static let currentDefaultModelVersion = 2
+    private static let currentDefaultModelVersion = 3
+    /// Earlier defaults. Installations still on one move to the current
+    /// default once; a model picked from the rest of the catalog is kept.
+    private static let previousDefaultModelIDs: Set<String> = [
+        "local.base.en",
+        "local.parakeet.v3",
+    ]
     private static let retiredProModelCacheID = "cleanup.gemma4.e2b.mlx.4bit"
 
     /// Read-only access to the live input level for visualizations.
@@ -102,6 +111,8 @@ final class DictationEngine: ObservableObject {
     private var lastCompletedTranscript: String?
     private var modelPreparationTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
+    private var proPreparationTask: Task<Void, Never>?
+    private var proCleanupDraft: ProCleanupDraft?
     private var geminiClient: GeminiTranscriptionClient?
     private var geminiClientKey: String?
     private var instructClient: OpenAITextClient?
@@ -127,6 +138,8 @@ final class DictationEngine: ObservableObject {
         ) ?? .defaultEngine
         proContextEnabled = defaults.object(forKey: Self.proContextEnabledKey) as? Bool
             ?? true
+        prepareProDuringRecording = defaults.object(forKey: Self.prepareProDuringRecordingKey) as? Bool
+            ?? true
         hotkeyConfiguration = HotkeyConfiguration.load(from: defaults)
 
         let levelMeter = AudioLevelMeter()
@@ -138,10 +151,10 @@ final class DictationEngine: ObservableObject {
         overlay = RecordingOverlay(levelMeter: levelMeter)
 
         let savedModelID = defaults.string(forKey: Self.selectedModelKey)
-        let shouldAdoptParakeetDefault = defaults.integer(forKey: Self.defaultModelVersionKey)
+        let shouldAdoptCurrentDefault = defaults.integer(forKey: Self.defaultModelVersionKey)
             < Self.currentDefaultModelVersion
-            && (savedModelID == nil || savedModelID == "local.base.en")
-        let requestedModelID = shouldAdoptParakeetDefault
+            && (savedModelID.map(Self.previousDefaultModelIDs.contains) ?? true)
+        let requestedModelID = shouldAdoptCurrentDefault
             ? ModelCatalog.defaultModelID
             : (savedModelID ?? ModelCatalog.defaultModelID)
         selectedModelID = ModelCatalog.model(id: requestedModelID).id
@@ -289,6 +302,7 @@ final class DictationEngine: ObservableObject {
     func shutdown() {
         modelPreparationTask?.cancel()
         transcriptionTask?.cancel()
+        cancelProPreparation()
         if activity == .recording {
             _ = capture.stop(keepActive: false)
         }
@@ -425,6 +439,8 @@ final class DictationEngine: ObservableObject {
                 )
                 let latency = ProcessInfo.processInfo.systemUptime - started
                 lastLatency = latency
+                // The breakdown describes live dictation, not history replay.
+                lastLatencyBreakdown = nil
                 activity = .idle
                 let warning = insertionResult.errorMessage ?? result.warning
                 if let warning {
@@ -517,6 +533,12 @@ final class DictationEngine: ObservableObject {
             lastContextSummary = "Context is turned off"
         }
         lastError = nil
+    }
+
+    func setPrepareProDuringRecording(_ enabled: Bool) {
+        guard activity == .idle else { return }
+        prepareProDuringRecording = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.prepareProDuringRecordingKey)
     }
 
     func pasteLastDictation() {
@@ -838,6 +860,7 @@ final class DictationEngine: ObservableObject {
 
         case .pushToTalkCancelled:
             guard activity == .recording, recordingMode == .pushToTalk else { return }
+            cancelProPreparation()
             let recording = capture.stop(keepActive: keepMicrophoneActive)
             applyPendingAudioRouteChangeIfNeeded()
             capture.recycle(recording.samples)
@@ -880,7 +903,7 @@ final class DictationEngine: ObservableObject {
     private func startRecording(mode: RecordingMode) {
         let target = TextInjector.captureTarget()
         do {
-            try capture.start()
+            try capture.start(prepareProDrafts: canPrepareProDrafts)
             let sessionID = UUID()
             recordingSessionID = sessionID
             insertionTarget = target
@@ -913,6 +936,7 @@ final class DictationEngine: ObservableObject {
             } else if dictationMode == .pro {
                 lastContextSummary = "Context is turned off"
             }
+            startProPreparation(sessionID: sessionID)
         } catch {
             if !keepMicrophoneActive {
                 capture.shutdown()
@@ -923,9 +947,82 @@ final class DictationEngine: ObservableObject {
         }
     }
 
+    private var canPrepareProDrafts: Bool {
+        guard prepareProDuringRecording, dictationMode == .pro, proModeEngine == .instruct else {
+            return false
+        }
+        switch selectedModel.backend {
+        case .localPhonon, .localParakeet: return true
+        case .localWhisper, .openAI: return false
+        }
+    }
+
+    private func startProPreparation(sessionID: UUID) {
+        cancelProPreparation()
+        guard canPrepareProDrafts else { return }
+        let draft = ProCleanupDraft()
+        proCleanupDraft = draft
+        let modelID = selectedModelID
+        let deadline = ProcessInfo.processInfo.systemUptime + Double(ProPauseDetector.maximumSeconds)
+        proPreparationTask = Task { [weak self] in
+            var attempts = 0
+            while !Task.isCancelled,
+                  attempts < ProPauseDetector.maximumDrafts,
+                  ProcessInfo.processInfo.systemUptime < deadline {
+                do {
+                    try await Task.sleep(for: .milliseconds(200))
+                    guard let self, self.recordingSessionID == sessionID else { return }
+                    guard let samples = self.capture.proDraftSnapshot() else { continue }
+                    attempts += 1
+                    let context = self.recordingContext
+                    let profilePrompt = self.profileStore.selectedProfile.prompt
+                    let raw = try await self.runtime.transcribe(samples: samples, modelID: modelID)
+                    try Task.checkCancellation()
+                    guard self.recordingSessionID == sessionID else { return }
+                    let client = try self.openAITextClient()
+                    let input = ProCleanupDraft.Input(
+                        transcript: raw, context: context, profilePrompt: profilePrompt
+                    )
+                    draft.start(input) {
+                        try await client.polish(raw, context: context, profilePrompt: profilePrompt)
+                    }
+                } catch {
+                    // Speculation is optional. A failed decode never changes
+                    // the recording or prevents the authoritative final pass.
+                    if Task.isCancelled { return }
+                }
+            }
+        }
+    }
+
+    private func cancelProPreparation() {
+        proPreparationTask?.cancel()
+        proPreparationTask = nil
+        proCleanupDraft?.cancel()
+        proCleanupDraft = nil
+    }
+
+    private func openAITextClient() throws -> OpenAITextClient {
+        guard let apiKey = KeychainStore.openAIAPIKey(), !apiKey.isEmpty else {
+            throw ProTranscriptionError.missingAPIKey
+        }
+        if instructClient == nil || instructClientKey != apiKey {
+            instructClient = OpenAITextClient(apiKey: apiKey)
+            instructClientKey = apiKey
+        }
+        guard let instructClient else { throw ProTranscriptionError.invalidResponse }
+        return instructClient
+    }
+
     private func stopAndTranscribe() {
+        let started = ProcessInfo.processInfo.systemUptime
         let recording = capture.stop(keepActive: keepMicrophoneActive)
         applyPendingAudioRouteChangeIfNeeded()
+        let captureDuration = ProcessInfo.processInfo.systemUptime - started
+        let preparationTask = proPreparationTask
+        preparationTask?.cancel()
+        proPreparationTask = nil
+        let cleanupDraft = proCleanupDraft
         recordingMode = nil
         recordingSessionID = nil
         let insertionTarget = self.insertionTarget
@@ -938,6 +1035,7 @@ final class DictationEngine: ObservableObject {
         let proProfile = profileStore.selectedProfile
 
         if let integrityIssue = recording.integrityIssue {
+            cancelProPreparation()
             capture.recycle(recording.samples)
             lastError = integrityIssue
             activity = .idle
@@ -947,6 +1045,7 @@ final class DictationEngine: ObservableObject {
         }
 
         guard recording.duration >= 0.16, recording.rms >= 0.0025 else {
+            cancelProPreparation()
             capture.recycle(recording.samples)
             activity = .idle
             overlay.hide()
@@ -955,19 +1054,28 @@ final class DictationEngine: ObservableObject {
 
         activity = .transcribing
         overlay.show(.transcribing)
-        let started = ProcessInfo.processInfo.systemUptime
 
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
-            defer { capture.recycle(recording.samples) }
+            defer {
+                capture.recycle(recording.samples)
+                cleanupDraft?.cancel()
+                if proCleanupDraft === cleanupDraft { proCleanupDraft = nil }
+            }
             do {
+                let waitStarted = ProcessInfo.processInfo.systemUptime
+                // Do not run two decodes against the same local backend.
+                await preparationTask?.value
+                try Task.checkCancellation()
+                let preparationDuration = ProcessInfo.processInfo.systemUptime - waitStarted
                 let result = try await transcribe(
                     samples: recording.samples,
                     model: model,
                     mode: dictationMode,
                     proEngine: proModeEngine,
                     context: context,
-                    profile: proProfile
+                    profile: proProfile,
+                    cleanupDraft: cleanupDraft
                 )
                 guard !Task.isCancelled else { return }
                 let transcript = result.text
@@ -976,12 +1084,24 @@ final class DictationEngine: ObservableObject {
                 if appendTrailingSpace, !insertion.isEmpty {
                     insertion.append(" ")
                 }
+                let insertionStarted = ProcessInfo.processInfo.systemUptime
                 let insertionResult = await TextInjector.inject(
                     insertion,
                     into: insertionTarget
                 )
                 let latency = ProcessInfo.processInfo.systemUptime - started
                 lastLatency = latency
+                let breakdown = DictationLatency(
+                    total: latency,
+                    capture: captureDuration,
+                    preparation: preparationDuration,
+                    transcription: result.transcriptionDuration,
+                    cleanup: result.cleanupDuration,
+                    insertion: ProcessInfo.processInfo.systemUptime - insertionStarted,
+                    reusedCleanup: result.reusedCleanup
+                )
+                lastLatencyBreakdown = breakdown
+                breakdown.log()
                 let warning = insertionResult.errorMessage
                     ?? result.warning
                     ?? (recording.wasTruncated
@@ -1052,11 +1172,16 @@ final class DictationEngine: ObservableObject {
         mode: DictationMode,
         proEngine: ProModeEngine,
         context: AccessibilityContextSnapshot?,
-        profile: ProProfile
-    ) async throws -> (text: String, warning: String?) {
+        profile: ProProfile,
+        cleanupDraft: ProCleanupDraft? = nil
+    ) async throws -> DictationTranscriptionResult {
+        let started = ProcessInfo.processInfo.systemUptime
         guard mode == .pro else {
             let transcript = try await runtime.transcribe(samples: samples, modelID: model.id)
-            return (transcript, nil)
+            return DictationTranscriptionResult(
+                text: transcript,
+                transcriptionDuration: ProcessInfo.processInfo.systemUptime - started
+            )
         }
 
         switch proEngine {
@@ -1065,26 +1190,32 @@ final class DictationEngine: ObservableObject {
                 samples: samples,
                 modelID: model.id
             )
-            guard let apiKey = KeychainStore.openAIAPIKey(), !apiKey.isEmpty else {
-                throw ProTranscriptionError.missingAPIKey
-            }
-            if instructClient == nil || instructClientKey != apiKey {
-                instructClient = OpenAITextClient(apiKey: apiKey)
-                instructClientKey = apiKey
-            }
-            guard let instructClient else { throw ProTranscriptionError.invalidResponse }
+            try Task.checkCancellation()
+            let transcriptionDuration = ProcessInfo.processInfo.systemUptime - started
+            let instructClient = try openAITextClient()
+            let cleanupStarted = ProcessInfo.processInfo.systemUptime
             do {
-                let polished = try await instructClient.polish(
-                    rawTranscript,
-                    context: context,
-                    profilePrompt: profile.prompt
+                let input = ProCleanupDraft.Input(
+                    transcript: rawTranscript, context: context, profilePrompt: profile.prompt
                 )
-                return (polished, nil)
+                let polished = try await (cleanupDraft ?? ProCleanupDraft()).resolve(input) {
+                    try await instructClient.polish(
+                        rawTranscript, context: context, profilePrompt: profile.prompt
+                    )
+                }
+                return DictationTranscriptionResult(
+                    text: polished.text,
+                    transcriptionDuration: transcriptionDuration,
+                    cleanupDuration: ProcessInfo.processInfo.systemUptime - cleanupStarted,
+                    reusedCleanup: polished.reused
+                )
             } catch {
                 if Task.isCancelled { throw CancellationError() }
-                return (
-                    rawTranscript,
-                    "Instruct Pro cleanup was unavailable, so the Fast transcript was inserted. \(error.localizedDescription)"
+                return DictationTranscriptionResult(
+                    text: rawTranscript,
+                    warning: "Instruct Pro cleanup was unavailable, so the Fast transcript was inserted. \(error.localizedDescription)",
+                    transcriptionDuration: transcriptionDuration,
+                    cleanupDuration: ProcessInfo.processInfo.systemUptime - cleanupStarted
                 )
             }
 
@@ -1104,7 +1235,10 @@ final class DictationEngine: ObservableObject {
                     context: context
                 )
             )
-            return (transcript, nil)
+            return DictationTranscriptionResult(
+                text: transcript,
+                transcriptionDuration: ProcessInfo.processInfo.systemUptime - started
+            )
         }
     }
 

@@ -1,9 +1,11 @@
 import Foundation
 import FluidAudio
+import MLX
 import WhisperKit
 
 actor TranscriptionRuntime {
     private enum PreparedBackend {
+        case phonon(PhononTranscriber)
         case parakeet(AsrManager)
         case whisper(WhisperKit)
         case openAI(RemoteTranscriptionClient, model: String)
@@ -12,6 +14,8 @@ actor TranscriptionRuntime {
     private var desiredModelID: String?
     private var preparedModelID: String?
     private var backend: PreparedBackend?
+    private var isTranscribing = false
+    private var transcriptionWaiters: [CheckedContinuation<Void, Never>] = []
 
     func prepare(
         model: TranscriptionModel,
@@ -21,9 +25,24 @@ actor TranscriptionRuntime {
         desiredModelID = model.id
         preparedModelID = nil
         backend = nil
+        Memory.clearCache()
 
         let prepared: PreparedBackend
         switch model.backend {
+        case let .localPhonon(variant, _):
+            let directory = try await PhononInstaller.install(
+                variant,
+                into: try ModelCache.downloadRoot(for: model.id),
+                progress: { value in progressRelay.send(value) }
+            )
+            ModelCache.record(folder: directory, for: model.id)
+            guard desiredModelID == model.id, !Task.isCancelled else {
+                throw CancellationError()
+            }
+            let transcriber = try PhononTranscriber(directory: directory, variant: variant)
+            transcriber.warmUp()
+            prepared = .phonon(transcriber)
+
         case .localParakeet:
             let models: AsrModels
             if let cached = ModelCache.cachedFolder(for: model.id),
@@ -114,11 +133,31 @@ actor TranscriptionRuntime {
     }
 
     func transcribe(samples: [Float], modelID: String) async throws -> String {
+        // Actors are reentrant across the Core ML awaits. A canceled draft
+        // must finish using the backend before another recording can use it.
+        if isTranscribing {
+            await withCheckedContinuation { transcriptionWaiters.append($0) }
+        } else {
+            isTranscribing = true
+        }
+        defer {
+            if transcriptionWaiters.isEmpty {
+                isTranscribing = false
+            } else {
+                transcriptionWaiters.removeFirst().resume()
+            }
+        }
+        try Task.checkCancellation()
         guard modelID == preparedModelID, let backend else {
             throw TranscriptionError.modelNotReady
         }
 
         switch backend {
+        case let .phonon(transcriber):
+            let transcript = transcriber.transcribe(samples)
+            try Task.checkCancellation()
+            return TextSanitizer.sanitize(transcript)
+
         case let .parakeet(pipeline):
             let decoderLayers = await pipeline.decoderLayerCount
             var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
@@ -154,6 +193,7 @@ actor TranscriptionRuntime {
         desiredModelID = nil
         preparedModelID = nil
         backend = nil
+        Memory.clearCache()
     }
 
     /// Parakeet v3 still performs acoustic language recognition. This hint

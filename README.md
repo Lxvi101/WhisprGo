@@ -78,6 +78,8 @@ WhisprGo removes avoidable wake-up latency rather than promising impossible zero
 - Only the selected transcription model is resident. Instruct Pro keeps it ready for the first pass; Gemini Pro releases it because Gemini receives the audio directly.
 - Local transcription uses Core ML and Apple Neural Engine defaults.
 - Cloud dictation reuses a single ephemeral URLSession connection pool.
+- Instruct Pro can prepare cleanup during pauses with Phonon or Parakeet. It makes at most three draft attempts in the first 30 seconds and reuses cleanup only when it matches the complete final transcript, profile, and context. Turn off **Prepare Pro during pauses** in General settings to avoid extra API requests.
+- Gemini returns finished text without waiting for its temporary-file deletion request. General settings show the latest dictation's total delay; hover over the time for capture, draft wait, transcription, cleanup, and insertion timings.
 - Text insertion tries the focused Accessibility element before falling back to Unicode key events.
 - History persistence starts only after transcription and text insertion finish; WAV encoding and atomic metadata writes run on a utility-priority actor.
 
@@ -86,6 +88,8 @@ See [Architecture](docs/ARCHITECTURE.md) for the full lifecycle and tradeoffs.
 ## Privacy
 
 Local transcription audio never leaves the Mac. OpenAI Fast model audio and Gemini Pro audio are uploaded only after a dictation ends—when the push-to-talk shortcut is released or the toggle is stopped. Instruct Pro first transcribes with the selected Fast model, then sends the transcript, profile instructions, and enabled bounded Accessibility context to OpenAI for cleanup. Gemini Pro sends the audio to Gemini Smart transcription in one pass and reduces enabled context to bounded custom-vocabulary hints. WhisprGo requests deletion of the temporary Gemini file after the response; Google also automatically expires uploaded files. API keys are stored in Keychain. WhisprGo keeps the latest 50 completed dictations as local WAV files and metadata under its Application Support folder; each item or the entire history can be deleted from Settings. If always-active input is enabled, idle samples are discarded immediately and never enter a recording buffer or history.
+
+**Prepare Pro during pauses** is enabled by default for Instruct Pro with Phonon or Parakeet. Draft transcripts, the profile, and enabled context can reach OpenAI while recording, including a recording you later cancel. Audio remains local for those models. Disable this setting to send only the final transcript after recording stops. Drafts remain in memory for one recording and are never added to history. Latency logs contain timings and a cleanup-reuse flag, not dictation content.
 
 ## Acknowledgements
 

@@ -559,6 +559,20 @@ private struct GeneralSettingsPane: View {
                     .disabled(engine.activity != .idle)
                     .help(engine.proModeEngine.detail)
 
+                    if engine.proModeEngine == .instruct {
+                        Toggle(
+                            "Prepare Pro during pauses",
+                            isOn: Binding(
+                                get: { engine.prepareProDuringRecording },
+                                set: { engine.setPrepareProDuringRecording($0) }
+                            )
+                        )
+                        .disabled(engine.activity != .idle)
+                        Text("With Phonon or Parakeet, starts cleanup while you speak to reduce the wait after release. May send up to three extra draft transcripts and enabled context to OpenAI in the first 30 seconds, including recordings you later cancel.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Toggle(
                         "Use nearby text in Pro Mode",
                         isOn: Binding(
@@ -570,6 +584,13 @@ private struct GeneralSettingsPane: View {
                     .help(proContextExplanation)
 
                     Toggle("Add a space after dictation", isOn: $engine.appendTrailingSpace)
+
+                    if let latency = engine.lastLatencyBreakdown {
+                        LabeledContent("Last dictation") {
+                            Text(String(format: "%.2f s", latency.total))
+                                .help(latency.detail)
+                        }
+                    }
 
                     if engine.isRetiredProModelDownloaded {
                         LabeledContent("Unused Gemma model (4.6 GB)") {
@@ -963,17 +984,19 @@ private struct ModelSettingsPane: View {
     var body: some View {
         SettingsPaneContainer {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ModelSection(
-                        title: "On device",
-                        models: ModelCatalog.local,
-                        engine: engine
-                    )
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    FeaturedModelCards(engine: engine)
+                    LegacyModelsSection(
+                        isInUse: engine.selectedModel.tier == .legacy
+                    ) {
+                        ModelList(models: ModelCatalog.legacy, engine: engine)
+                    }
                     ModelSection(
                         title: "OpenAI",
                         models: ModelCatalog.cloud,
                         engine: engine
                     )
+                    PhononAttribution()
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 8)
@@ -992,20 +1015,28 @@ private struct ModelSection: View {
         VStack(alignment: .leading, spacing: 6) {
             DottedSectionLabel(title)
                 .padding(.leading, 4)
+            ModelList(models: models, engine: engine)
+        }
+    }
+}
 
-            VStack(spacing: 0) {
-                ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
-                    if index > 0 {
-                        Divider().padding(.leading, 40)
-                    }
-                    ModelRow(model: model, engine: engine)
+private struct ModelList: View {
+    let models: [TranscriptionModel]
+    @ObservedObject var engine: DictationEngine
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(models.enumerated()), id: \.element.id) { index, model in
+                if index > 0 {
+                    Divider().padding(.leading, 40)
                 }
+                ModelRow(model: model, engine: engine)
             }
-            .background(Signal.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Signal.hairline, lineWidth: 1)
-            }
+        }
+        .background(Signal.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Signal.hairline, lineWidth: 1)
         }
     }
 }
@@ -1014,6 +1045,7 @@ private struct ModelRow: View {
     let model: TranscriptionModel
     @ObservedObject var engine: DictationEngine
     @State private var isConfirmingRemoval = false
+    @State private var removableSize: String?
 
     private var isSelected: Bool { engine.selectedModelID == model.id }
     private var isDownloaded: Bool {
@@ -1049,6 +1081,9 @@ private struct ModelRow: View {
             .accessibilityLabel("\(model.name)\(status.map { ", \($0)" } ?? "")")
 
             Button {
+                removableSize = ModelCache.downloadedBytes(for: model.id).map {
+                    ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+                }
                 isConfirmingRemoval = true
             } label: {
                 Image(systemName: "trash")
@@ -1069,7 +1104,7 @@ private struct ModelRow: View {
                 engine.removeDownloadedModel(model.id)
             }
         } message: {
-            Text("This frees \(model.sizeLabel ?? "its downloaded data") of storage. Selecting it later downloads it again automatically.")
+            Text("This frees \(removableSize ?? model.sizeLabel ?? "its downloaded data") of storage. Selecting it later downloads it again automatically.")
         }
     }
 

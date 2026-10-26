@@ -86,6 +86,7 @@ final class AudioCapture {
     private var wasTruncated = false
     private var sourceDuration: TimeInterval = 0
     private var conversionFailureCount = 0
+    private var proPauseDetector: ProPauseDetector?
     private var allowedExternalMicrophoneUIDs: Set<String>
     private(set) var activeInputName: String?
     private(set) var activeInputUID: String?
@@ -172,7 +173,7 @@ final class AudioCapture {
         try startQueueIfNeeded()
     }
 
-    func start() throws {
+    func start(prepareProDrafts: Bool = false) throws {
         try prepare()
 
         lock.lock()
@@ -187,6 +188,7 @@ final class AudioCapture {
         wasTruncated = false
         sourceDuration = 0
         conversionFailureCount = 0
+        proPauseDetector = prepareProDrafts ? ProPauseDetector() : nil
         isRecording = true
         lock.unlock()
         recordingGate.store(true)
@@ -201,6 +203,18 @@ final class AudioCapture {
             lock.unlock()
             throw error
         }
+    }
+
+    /// Called by the Pro preparation task, never by the audio callback. The
+    /// independent copy avoids making the next callback copy shared storage.
+    /// Size and frequency are bounded by ProPauseDetector.
+    func proDraftSnapshot() -> [Float]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard isRecording, conversionFailureCount == 0,
+              proPauseDetector?.takePause(sampleRate: Int(Self.sampleRate)) == true
+        else { return nil }
+        return samples.withUnsafeBufferPointer { Array($0) }
     }
 
     func stop(keepActive: Bool) -> AudioCaptureResult {
@@ -349,6 +363,7 @@ final class AudioCapture {
             }
             sumOfSquares += Double(energy)
             sampleCount += accepted
+            proPauseDetector?.append(sampleCount: accepted, rms: level)
         }
         if accepted < count {
             wasTruncated = true

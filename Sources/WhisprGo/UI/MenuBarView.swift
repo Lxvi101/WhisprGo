@@ -115,7 +115,12 @@ struct MenuBarView: View {
                     Spacer()
                     Picker("Model", selection: modelBinding) {
                         Section("On device") {
-                            ForEach(ModelCatalog.local) { model in
+                            ForEach(ModelCatalog.featured) { model in
+                                Text(model.name).tag(model.id)
+                            }
+                        }
+                        Section("Legacy") {
+                            ForEach(ModelCatalog.legacy) { model in
                                 Text(model.name).tag(model.id)
                             }
                         }
