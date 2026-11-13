@@ -34,16 +34,16 @@ enum BrandAssets {
             extension: "png",
             developmentPath: "Packaging/MenuBarIconTemplate.png"
         ) ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: nil)!
-        image.size = NSSize(width: 25, height: 13)
+        image.size = NSSize(width: 22, height: 15)
         image.isTemplate = true
         return image
     }()
 
-    static let waveformMark: NSImage = {
+    static let brandMark: NSImage = {
         let image = loadImage(
-            named: "WaveformMark",
+            named: "BrandMark",
             extension: "png",
-            developmentPath: "Packaging/WaveformMark.png"
+            developmentPath: "Packaging/BrandMark.png"
         ) ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: nil)!
         image.isTemplate = true
         return image
@@ -73,14 +73,17 @@ enum BrandAssets {
     }
 }
 
-struct BrandWaveform: View {
+/// The Speak → Type mark: a voice and the caret it types into.
+struct BrandMark: View {
+    static let aspectRatio: CGFloat = 430.5 / 318
+
     var body: some View {
-        Image(nsImage: BrandAssets.waveformMark)
+        Image(nsImage: BrandAssets.brandMark)
             .renderingMode(.template)
             .resizable()
             .interpolation(.high)
             .antialiased(true)
-            .aspectRatio(950.0 / 520.0, contentMode: .fit)
+            .aspectRatio(Self.aspectRatio, contentMode: .fit)
             .foregroundStyle(.primary)
             .accessibilityHidden(true)
     }

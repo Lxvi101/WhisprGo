@@ -55,6 +55,9 @@ final class DictationEngine: ObservableObject {
     @Published private(set) var prepareProDuringRecording: Bool
     @Published private(set) var lastContextSummary: String?
     @Published private(set) var hotkeyConfiguration: HotkeyConfiguration
+    /// The signed-in ChatGPT account for ChatGPT Mode. Never holds tokens.
+    @Published private(set) var chatGPTAccount: ChatGPTAccountSummary?
+    @Published private(set) var isSigningInToChatGPT = false
 
     @Published var selectedModelID: String {
         didSet {
@@ -117,6 +120,9 @@ final class DictationEngine: ObservableObject {
     private var geminiClientKey: String?
     private var instructClient: OpenAITextClient?
     private var instructClientKey: String?
+    private let chatGPTAuth = ChatGPTAuth.shared
+    private lazy var chatGPTClient = ChatGPTTranscriptionClient(auth: chatGPTAuth)
+    private var chatGPTSignInTask: Task<Void, Never>?
     private var hasPendingAudioRouteChange = false
 
     private init() {
@@ -141,6 +147,7 @@ final class DictationEngine: ObservableObject {
         prepareProDuringRecording = defaults.object(forKey: Self.prepareProDuringRecordingKey) as? Bool
             ?? true
         hotkeyConfiguration = HotkeyConfiguration.load(from: defaults)
+        chatGPTAccount = KeychainChatGPTCredentialStore().load().map(ChatGPTAccountSummary.init)
 
         let levelMeter = AudioLevelMeter()
         self.levelMeter = levelMeter
@@ -171,11 +178,16 @@ final class DictationEngine: ObservableObject {
     }
 
     var needsProviderKey: Bool {
-        if dictationMode == .pro, proModeEngine == .geminiTranscribe {
+        switch dictationMode {
+        case .chatGPT:
+            return chatGPTAccount == nil
+        case .pro where proModeEngine == .geminiTranscribe:
             return !googleAPIKeyConfigured
+        case .pro:
+            return !openAIKeyConfigured
+        case .fast:
+            return !selectedModel.isLocal && !openAIKeyConfigured
         }
-        return (dictationMode == .pro || !selectedModel.isLocal)
-            && !openAIKeyConfigured
     }
 
     var dictationModeDetail: String {
@@ -216,8 +228,10 @@ final class DictationEngine: ObservableObject {
         }
 
         if !permissions.isComplete { return "Finish setup" }
-        if needsProviderKey { return "API key needed" }
-        if dictationMode == .pro, proModeEngine == .geminiTranscribe { return "Ready" }
+        if needsProviderKey {
+            return dictationMode == .chatGPT ? "Sign in to ChatGPT" : "API key needed"
+        }
+        if !usesSelectedTranscriptionModel { return "Ready" }
         switch modelState {
         case .starting: return "Starting"
         case .downloading: return "Downloading model"
@@ -243,11 +257,13 @@ final class DictationEngine: ObservableObject {
         if !permissions.microphone { return "Allow microphone access" }
         if !permissions.accessibility { return "Allow Accessibility access" }
         if needsProviderKey {
-            return dictationMode == .pro && proModeEngine == .geminiTranscribe
-                ? "Add your Google key in Settings"
-                : "Add your OpenAI key in Settings"
+            switch dictationMode {
+            case .chatGPT: return "Sign in with ChatGPT in Settings"
+            case .pro where proModeEngine == .geminiTranscribe: return "Add your Google key in Settings"
+            case .pro, .fast: return "Add your OpenAI key in Settings"
+            }
         }
-        if dictationMode == .pro, proModeEngine == .geminiTranscribe {
+        if !usesSelectedTranscriptionModel {
             return "Hold \(hotkeyConfiguration[.pushToTalk].displayText), or \(hotkeyConfiguration[.toggleDictation].displayText) to toggle"
         }
         switch modelState {
@@ -275,12 +291,17 @@ final class DictationEngine: ObservableObject {
 
     private var pipelineIsReady: Bool {
         guard !needsProviderKey else { return false }
-        return dictationMode == .pro && proModeEngine == .geminiTranscribe
-            || modelState == .ready
+        return !usesSelectedTranscriptionModel || modelState == .ready
     }
 
+    /// Fast Mode and Instruct Pro transcribe with the selected model. Gemini
+    /// Pro and ChatGPT Mode send audio to the cloud and release it.
     private var usesSelectedTranscriptionModel: Bool {
-        dictationMode == .fast || proModeEngine == .instruct
+        switch dictationMode {
+        case .fast: return true
+        case .pro: return proModeEngine == .instruct
+        case .chatGPT: return false
+        }
     }
 
     func start() {
@@ -300,6 +321,7 @@ final class DictationEngine: ObservableObject {
     }
 
     func shutdown() {
+        chatGPTSignInTask?.cancel()
         modelPreparationTask?.cancel()
         transcriptionTask?.cancel()
         cancelProPreparation()
@@ -450,6 +472,7 @@ final class DictationEngine: ObservableObject {
                 } else {
                     overlay.hide()
                 }
+                announce(insertionResult, afterWarning: warning != nil)
                 history.updateAfterRerun(
                     id: id,
                     transcript: transcript,
@@ -557,12 +580,71 @@ final class DictationEngine: ObservableObject {
                 return
             }
             let result = await TextInjector.inject(transcript, into: target)
-            if let error = result.errorMessage {
-                lastError = error
+            switch result {
+            case let .failed(message):
+                lastError = message
                 modeBadge.show("Could not paste")
-            } else {
+            case .inserted, .pasted:
                 modeBadge.show("Pasted last dictation")
+            case .copied, .ignored:
+                announce(result, afterWarning: false)
             }
+        }
+    }
+
+    // MARK: ChatGPT
+
+    /// Opens the ChatGPT sign-in in the browser and waits for its redirect.
+    func signInToChatGPT() {
+        guard chatGPTSignInTask == nil else { return }
+        isSigningInToChatGPT = true
+        lastError = nil
+        let auth = chatGPTAuth
+        chatGPTSignInTask = Task { [weak self] in
+            do {
+                let account = try await auth.signIn { url in
+                    await MainActor.run { _ = NSWorkspace.shared.open(url) }
+                }
+                guard let self else { return }
+                chatGPTAccount = account
+                lastError = nil
+                modeBadge.show("ChatGPT connected")
+            } catch is CancellationError {
+                // The user cancelled; nothing to report.
+            } catch {
+                self?.lastError = error.localizedDescription
+            }
+            self?.isSigningInToChatGPT = false
+            self?.chatGPTSignInTask = nil
+        }
+    }
+
+    func cancelChatGPTSignIn() {
+        chatGPTSignInTask?.cancel()
+    }
+
+    func signOutOfChatGPT() {
+        guard activity == .idle else { return }
+        chatGPTSignInTask?.cancel()
+        chatGPTAccount = nil
+        lastError = nil
+        let auth = chatGPTAuth
+        Task { await auth.signOut() }
+    }
+
+    /// Tells the user where the transcript went. Successful deliveries get a
+    /// brief notice; a transcript left on the clipboard stays up longer
+    /// because it asks for Command-V. After a warning, the notice waits for
+    /// the error capsule to clear.
+    private func announce(_ delivery: TextInjector.Result, afterWarning: Bool) {
+        guard delivery.errorMessage == nil, let notice = delivery.notice else { return }
+        let duration: TimeInterval = delivery.isManualPaste ? 3.2 : 1.1
+        guard afterWarning else {
+            modeBadge.show(notice, duration: duration)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.modeBadge.show(notice, duration: duration)
         }
     }
 
@@ -876,11 +958,11 @@ final class DictationEngine: ObservableObject {
 
         case .toggleMode:
             guard activity == .idle else { return }
-            let nextMode: DictationMode = dictationMode == .fast ? .pro : .fast
+            let nextMode = dictationMode.next
             setDictationMode(nextMode)
             let suffix: String
-            if nextMode == .pro, needsProviderKey {
-                suffix = " · Key needed"
+            if needsProviderKey {
+                suffix = nextMode == .chatGPT ? " · Sign in needed" : " · Key needed"
             } else if nextMode == .pro,
                       proModeEngine == .instruct,
                       modelState != .ready {
@@ -936,6 +1018,7 @@ final class DictationEngine: ObservableObject {
             } else if dictationMode == .pro {
                 lastContextSummary = "Context is turned off"
             }
+            prewarmCloudConnections()
             startProPreparation(sessionID: sessionID)
         } catch {
             if !keepMicrophoneActive {
@@ -944,6 +1027,30 @@ final class DictationEngine: ObservableObject {
             lastError = error.localizedDescription
             overlay.show(.error)
             overlay.hide(after: 0.8)
+        }
+    }
+
+    /// Opens every connection the release will need while the user speaks,
+    /// so the requests after release skip DNS, TCP and TLS setup. Nothing here
+    /// sends audio, text or credentials.
+    private func prewarmCloudConnections() {
+        if usesSelectedTranscriptionModel, case .openAI = selectedModel.backend {
+            let runtime = runtime
+            Task.detached(priority: .userInitiated) { await runtime.prewarm() }
+        }
+        switch dictationMode {
+        case .fast:
+            break
+        case .chatGPT:
+            // Also renew a nearly expired token now, not after release.
+            chatGPTClient.prewarm()
+            let auth = chatGPTAuth
+            Task.detached(priority: .userInitiated) { await auth.renewIfNeededSoon() }
+        case .pro:
+            switch proModeEngine {
+            case .instruct: (try? openAITextClient())?.prewarm()
+            case .geminiTranscribe: (try? geminiTranscriptionClient())?.prewarm()
+            }
         }
     }
 
@@ -1000,6 +1107,18 @@ final class DictationEngine: ObservableObject {
         proPreparationTask = nil
         proCleanupDraft?.cancel()
         proCleanupDraft = nil
+    }
+
+    private func geminiTranscriptionClient() throws -> GeminiTranscriptionClient {
+        guard let apiKey = KeychainStore.googleAPIKey(), !apiKey.isEmpty else {
+            throw GeminiTranscriptionError.missingAPIKey
+        }
+        if geminiClient == nil || geminiClientKey != apiKey {
+            geminiClient = GeminiTranscriptionClient(apiKey: apiKey)
+            geminiClientKey = apiKey
+        }
+        guard let geminiClient else { throw GeminiTranscriptionError.invalidResponse }
+        return geminiClient
     }
 
     private func openAITextClient() throws -> OpenAITextClient {
@@ -1117,6 +1236,7 @@ final class DictationEngine: ObservableObject {
                 } else {
                     overlay.hide()
                 }
+                announce(insertionResult, afterWarning: warning != nil)
                 // Persistence is deliberately enqueued only after the result
                 // has been injected and the latency-sensitive work is over.
                 history.enqueue(
@@ -1176,12 +1296,27 @@ final class DictationEngine: ObservableObject {
         cleanupDraft: ProCleanupDraft? = nil
     ) async throws -> DictationTranscriptionResult {
         let started = ProcessInfo.processInfo.systemUptime
-        guard mode == .pro else {
+        switch mode {
+        case .fast:
             let transcript = try await runtime.transcribe(samples: samples, modelID: model.id)
             return DictationTranscriptionResult(
                 text: transcript,
                 transcriptionDuration: ProcessInfo.processInfo.systemUptime - started
             )
+        case .chatGPT:
+            do {
+                let transcript = try await chatGPTClient.transcribe(samples: samples)
+                return DictationTranscriptionResult(
+                    text: transcript,
+                    transcriptionDuration: ProcessInfo.processInfo.systemUptime - started
+                )
+            } catch let error as ChatGPTError
+                where error == .sessionExpired || error == .signInRequired {
+                chatGPTAccount = nil
+                throw error
+            }
+        case .pro:
+            break
         }
 
         switch proEngine {
@@ -1220,15 +1355,7 @@ final class DictationEngine: ObservableObject {
             }
 
         case .geminiTranscribe:
-            guard let apiKey = KeychainStore.googleAPIKey(), !apiKey.isEmpty else {
-                throw GeminiTranscriptionError.missingAPIKey
-            }
-            if geminiClient == nil || geminiClientKey != apiKey {
-                geminiClient = GeminiTranscriptionClient(apiKey: apiKey)
-                geminiClientKey = apiKey
-            }
-            guard let geminiClient else { throw GeminiTranscriptionError.invalidResponse }
-            let transcript = try await geminiClient.transcribe(
+            let transcript = try await geminiTranscriptionClient().transcribe(
                 samples: samples,
                 customVocabulary: GeminiVocabulary.terms(
                     profileText: profile.prompt,
@@ -1265,7 +1392,11 @@ final class DictationEngine: ObservableObject {
         mode: DictationMode,
         proEngine: ProModeEngine
     ) -> String {
-        guard mode == .pro else { return model.id }
+        switch mode {
+        case .fast: return model.id
+        case .chatGPT: return ChatGPTTranscriptionClient.modelIdentifier
+        case .pro: break
+        }
         switch proEngine {
         case .instruct:
             return "\(model.id)+openai.\(OpenAITextClient.model)"
@@ -1280,7 +1411,11 @@ final class DictationEngine: ObservableObject {
         proEngine: ProModeEngine,
         profile: ProProfile
     ) -> String {
-        guard mode == .pro else { return model.name }
+        switch mode {
+        case .fast: return model.name
+        case .chatGPT: return ChatGPTTranscriptionClient.displayName
+        case .pro: break
+        }
         switch proEngine {
         case .instruct:
             return "\(model.name) · Instruct Pro · \(profile.name)"

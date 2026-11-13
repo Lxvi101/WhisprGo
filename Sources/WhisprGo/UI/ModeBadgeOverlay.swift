@@ -6,14 +6,16 @@ final class ModeBadgeOverlay {
     private var label: NSTextField?
     private var pendingHide: DispatchWorkItem?
 
-    func show(_ text: String) {
+    /// Shows a short notice. Mode changes and successful deliveries use the
+    /// brief default; notices that ask for an action stay up longer.
+    func show(_ text: String, duration: TimeInterval = 1.05) {
         pendingHide?.cancel()
         ensurePanel()
         guard let panel, let label else { return }
 
         label.stringValue = text
         label.sizeToFit()
-        let width = max(126, min(240, label.frame.width + 58))
+        let width = max(126, min(420, label.frame.width + 58))
         panel.setContentSize(NSSize(width: width, height: 38))
         position(panel)
         panel.alphaValue = 0
@@ -36,7 +38,7 @@ final class ModeBadgeOverlay {
             })
         }
         pendingHide = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 
     private func ensurePanel() {

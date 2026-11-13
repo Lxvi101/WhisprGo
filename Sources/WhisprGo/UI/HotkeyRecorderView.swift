@@ -27,8 +27,15 @@ struct HotkeyRecorderRow: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            Text(action.title)
-                .help(action.detail)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(action.title)
+                if action.requiresDoubleTap(shortcut) {
+                    Text("Double-tap")
+                        .font(.caption)
+                        .foregroundStyle(Signal.textSecondary)
+                }
+            }
+            .help(action.detail)
 
             Spacer(minLength: 12)
 

@@ -1,25 +1,34 @@
 import Foundation
 
-final class OpenAITextClient {
+final class OpenAITextClient: @unchecked Sendable {
     static let model = "gpt-5.6-luna"
 
-    private let endpoint = URL(string: "https://api.openai.com/v1/responses")!
+    static let endpoint = URL(string: "https://api.openai.com/v1/responses")!
     private let apiKey: String
     private let session: URLSession
+    private let warmer: ConnectionWarmer
 
     init(apiKey: String, session: URLSession? = nil) {
         self.apiKey = apiKey
-        if let session {
-            self.session = session
-        } else {
+        let session = session ?? {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.timeoutIntervalForRequest = 20
             configuration.timeoutIntervalForResource = 30
             configuration.waitsForConnectivity = false
             configuration.httpMaximumConnectionsPerHost = 1
+            configuration.httpShouldSetCookies = false
             configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-            self.session = URLSession(configuration: configuration)
-        }
+            return URLSession(configuration: configuration)
+        }()
+        self.session = session
+        warmer = ConnectionWarmer(url: Self.endpoint, session: session)
+    }
+
+    /// Opens the HTTPS connection while the user speaks, so the cleanup
+    /// request after transcription skips connection setup. The HEAD carries
+    /// no API key.
+    func prewarm() {
+        warmer.warm()
     }
 
     func polish(
@@ -29,7 +38,7 @@ final class OpenAITextClient {
     ) async throws -> String {
         guard !rawTranscript.isEmpty else { return rawTranscript }
 
-        var request = URLRequest(url: endpoint)
+        var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 20
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

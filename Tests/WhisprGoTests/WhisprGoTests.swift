@@ -44,9 +44,13 @@ final class WhisprGoTests: XCTestCase {
     }
 
     func testDictationModesKeepFastAndProAsSeparatePipelines() {
-        XCTAssertEqual(DictationMode.allCases, [.fast, .pro])
+        XCTAssertEqual(DictationMode.allCases, [.fast, .pro, .chatGPT])
         XCTAssertTrue(DictationMode.fast.detail.contains("No cleanup model"))
         XCTAssertTrue(DictationMode.pro.detail.contains("Pro engine"))
+        XCTAssertTrue(DictationMode.chatGPT.detail.contains("ChatGPT sign-in"))
+        XCTAssertEqual(DictationMode.fast.next, .pro)
+        XCTAssertEqual(DictationMode.pro.next, .chatGPT)
+        XCTAssertEqual(DictationMode.chatGPT.next, .fast)
         XCTAssertEqual(ProModeEngine.allCases, [.instruct, .geminiTranscribe])
         XCTAssertEqual(ProModeEngine.defaultEngine, .instruct)
         XCTAssertTrue(ProModeEngine.instruct.detail.contains("GPT-5.6 Luna"))
@@ -404,12 +408,13 @@ final class WhisprGoTests: XCTestCase {
         ))
     }
 
-    func testGeminiClientUploadsAudioUsesSmartModeAndDeletesFile() async throws {
+    func testGeminiClientFallsBackToUploadWhenInlineAudioIsRejectedAndDeletesFile() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ProModeURLProtocol.self]
         let session = URLSession(configuration: configuration)
         var requests = [URLRequest]()
         let deletion = expectation(description: "Uploaded file deleted asynchronously")
+        deletion.expectedFulfillmentCount = 2
 
         ProModeURLProtocol.handler = { request in
             requests.append(request)
@@ -452,6 +457,13 @@ final class WhisprGoTests: XCTestCase {
                     transcription["custom_vocabulary"] as? [String],
                     ["WhisprGo", "RØDE"]
                 )
+                let input = try XCTUnwrap((json["input"] as? [[String: Any]])?.first)
+                if input["data"] != nil {
+                    XCTAssertNil(input["uri"])
+                    let data = Data(#"{"error":{"message":"Inline audio is not supported."}}"#.utf8)
+                    return (HTTPURLResponse(url: url, statusCode: 400, httpVersion: nil, headerFields: nil)!, data)
+                }
+                XCTAssertEqual(input["uri"] as? String, "https://generativelanguage.googleapis.com/v1beta/files/test-file")
                 let data = Data(#"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"I took the taxi."}]}]}"#.utf8)
                 return (HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
             case "/v1beta/files/test-file":
@@ -464,16 +476,20 @@ final class WhisprGoTests: XCTestCase {
         }
         defer { ProModeURLProtocol.handler = nil }
 
-        let output = try await GeminiTranscriptionClient(
-            apiKey: "test-key",
-            session: session
-        ).transcribe(
-            samples: [0, 0.25, -0.25],
+        let client = GeminiTranscriptionClient(apiKey: "test-key", session: session)
+        let samples = (0..<16_000).map { sin(Float($0) * 0.06) * 0.3 }
+        let output = try await client.transcribe(
+            samples: samples,
             customVocabulary: ["WhisprGo", "RØDE"]
         )
         XCTAssertEqual(output, "I took the taxi.")
+
+        // Once the upload got past a rejection, inline audio is not retried.
+        _ = try await client.transcribe(samples: samples, customVocabulary: ["WhisprGo", "RØDE"])
         await fulfillment(of: [deletion], timeout: 2)
-        XCTAssertEqual(requests.count, 4)
+        // First: rejected inline request, upload start, upload, request, delete.
+        // Second: upload start, upload, request, delete.
+        XCTAssertEqual(requests.count, 9)
     }
 
     func testInstructProClientUsesLunaWithoutReasoningOrResponseStorage() async throws {
@@ -708,23 +724,38 @@ final class WhisprGoTests: XCTestCase {
         ))
     }
 
-    func testStartupLineWaveBuildsLeftToRightAndSettlesExactly() throws {
-        XCTAssertEqual(StartupMotionPreset.production, .lineWave)
-        XCTAssertEqual(StartupMotionPreset.allCases.count, 4)
-        XCTAssertEqual(StartupDotGeometry.dots.count, 55)
+    func testStartupMarkSequenceFlowsFromVoiceToCaretAndSettlesExactly() throws {
+        let times = StartupMarkMotion.sampleTimes
+        XCTAssertEqual(times.count, 121)
+        XCTAssertEqual(try XCTUnwrap(times.last), StartupMarkMotion.duration, accuracy: 0.000_001)
 
-        let left = try XCTUnwrap(StartupDotGeometry.dots.min { $0.centerX < $1.centerX })
-        let right = try XCTUnwrap(StartupDotGeometry.dots.max { $0.centerX < $1.centerX })
-        let leftSamples = StartupMotionPreset.lineWave.samples(for: left, index: 0)
-        let rightSamples = StartupMotionPreset.lineWave.samples(for: right, index: 0)
-        let final = try XCTUnwrap(leftSamples.last)
+        // The voice appears first; the caret grows in after it.
+        XCTAssertGreaterThan(StartupMarkMotion.voice(at: 0.1).opacity, StartupMarkMotion.caret(at: 0.1).opacity)
+        XCTAssertEqual(StartupMarkMotion.caret(at: 0).opacity, 0, accuracy: 0.000_001)
 
-        XCTAssertEqual(leftSamples.count, 86)
-        XCTAssertGreaterThan(leftSamples[24].opacity, rightSamples[24].opacity)
-        XCTAssertEqual(final.opacity, 1, accuracy: 0.000_001)
-        XCTAssertEqual(final.translateX, 0, accuracy: 0.000_001)
-        XCTAssertEqual(final.translateY, 0, accuracy: 0.000_001)
-        XCTAssertEqual(final.scale, 1, accuracy: 0.000_001)
+        // Each word leaves from the voice, is visible in flight, and is absorbed.
+        for (index, droplet) in StartupMarkMotion.droplets.enumerated() {
+            XCTAssertEqual(StartupMarkMotion.droplet(index, at: droplet.launch - 0.01).opacity, 0)
+            let midFlight = StartupMarkMotion.droplet(index, at: droplet.launch + StartupMarkMotion.flight / 2)
+            XCTAssertEqual(midFlight.opacity, 1, accuracy: 0.000_001)
+            XCTAssertGreaterThan(midFlight.translateX, 0)
+            XCTAssertEqual(StartupMarkMotion.droplet(index, at: StartupMarkMotion.duration).opacity, 0)
+        }
+
+        // The caret blinks once after the last word lands.
+        XCTAssertEqual(StartupMarkMotion.caret(at: 1.57).opacity, 0, accuracy: 0.000_001)
+
+        // The final frame is the resting layout, and the frame before it is
+        // already indistinguishable from it, so there is no snap at the end.
+        let penultimate = times[times.count - 2]
+        for sample in [StartupMarkMotion.voice(at: penultimate), StartupMarkMotion.caret(at: penultimate)] {
+            XCTAssertEqual(sample.opacity, 1, accuracy: 0.001)
+            XCTAssertEqual(sample.translateX, 0, accuracy: 0.01)
+            XCTAssertEqual(sample.scaleX, 1, accuracy: 0.001)
+            XCTAssertEqual(sample.scaleY, 1, accuracy: 0.001)
+        }
+        XCTAssertEqual(StartupMarkMotion.voice(at: StartupMarkMotion.duration), .resting)
+        XCTAssertEqual(StartupMarkMotion.caret(at: StartupMarkMotion.duration), .resting)
     }
 
     func testAudioLevelMeterKeepsNewestValue() {

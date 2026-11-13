@@ -69,6 +69,8 @@ git diff --check
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --configuration release
 ```
 
+mlx-swift 0.32.3 requires Swift tools 6.3. When Xcode's bundled Swift is older (Xcode 26.x ships 6.2), install the signed swift.org 6.3 toolchain under `~/Library/Developer/Toolchains` and export `TOOLCHAINS` with its bundle identifier (for 6.3.3: `org.swift.633202606251a`) for every `swift test`, `Scripts/build-app.sh`, and `Scripts/build-release.sh` run. `swift --version` must report 6.3 or newer.
+
 The Command Line Tools toolchain has no XCTest, so tests use Xcode's toolchain. `PhononTests.testTranscriptsMatchFermionReferenceRuntime` is skipped unless `PHONON_TEST_ARCHIVES` and `PHONON_TEST_AUDIO` point at the published archives and reference audio, and `mlx.metallib` from `.build/mlx-metallib/` is copied next to the test binary.
 
 Do not run performance benchmarks unless the user requests them. A code-review performance audit is separate from release correctness checks.

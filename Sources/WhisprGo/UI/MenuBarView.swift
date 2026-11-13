@@ -108,6 +108,18 @@ struct MenuBarView: View {
 
             if engine.dictationMode == .pro {
                 ProProfilePicker()
+            } else if engine.dictationMode == .chatGPT {
+                if let account = engine.chatGPTAccount {
+                    HStack {
+                        Text("Account")
+                            .foregroundStyle(Signal.textSecondary)
+                        Spacer()
+                        Text(account.menuLabel)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .font(.system(size: 12))
+                }
             } else {
                 HStack {
                     Text("Model")
@@ -520,6 +532,14 @@ private struct APIKeyNotice: View {
     @ObservedObject var engine: DictationEngine
 
     var body: some View {
+        if engine.dictationMode == .chatGPT {
+            ChatGPTSignInNotice(engine: engine)
+        } else {
+            keyNotice
+        }
+    }
+
+    private var keyNotice: some View {
         MinimalPanel(padding: 12) {
             HStack(spacing: 10) {
                 Text(
@@ -536,4 +556,35 @@ private struct APIKeyNotice: View {
             }
         }
     }
+}
+
+private struct ChatGPTSignInNotice: View {
+    @ObservedObject var engine: DictationEngine
+
+    var body: some View {
+        MinimalPanel(padding: 12) {
+            HStack(spacing: 10) {
+                Text(engine.isSigningInToChatGPT ? "Finish signing in in your browser." : "Sign in with ChatGPT.")
+                    .font(.system(size: 12))
+                Spacer()
+                if engine.isSigningInToChatGPT {
+                    Button("Cancel", action: engine.cancelChatGPTSignIn)
+                        .buttonStyle(SignalPillButtonStyle())
+                } else {
+                    Button("Sign In", action: engine.signInToChatGPT)
+                        .buttonStyle(SignalPillButtonStyle(prominent: true))
+                }
+            }
+        }
+    }
+}
+
+extension ChatGPTAccountSummary {
+    var menuLabel: String {
+        [email, planTitle].compactMap { $0 }.joined(separator: " · ").nonEmpty ?? "Signed in"
+    }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

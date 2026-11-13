@@ -42,14 +42,13 @@ enum AccessibilityContextReader {
     static let nearbyCharacterLimit = 2_800
 
     static func capture(from target: TextInjector.Target?) -> AccessibilityContextSnapshot? {
-        guard AXIsProcessTrusted(), let target else { return nil }
+        guard AXIsProcessTrusted(), let target, let element = target.element else { return nil }
 
         let runningApplication = NSRunningApplication(
             processIdentifier: target.processIdentifier
         )
         let applicationName = runningApplication?.localizedName ?? ""
         let bundleIdentifier = runningApplication?.bundleIdentifier
-        let element = target.element
         _ = AXUIElementSetMessagingTimeout(element, 0.04)
 
         let role = stringAttribute(element, kAXRoleAttribute)

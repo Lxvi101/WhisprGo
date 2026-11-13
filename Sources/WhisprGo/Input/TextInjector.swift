@@ -12,6 +12,11 @@ enum SyntheticEventTag {
 @MainActor
 enum TextInjector {
     private static let webAreaRole = "AXWebArea"
+    private static let editableRoles: Set<String> = [
+        kAXTextFieldRole,
+        kAXTextAreaRole,
+        kAXComboBoxRole,
+    ]
     private static let pasteEventDelay = Duration.milliseconds(5)
     private static let pasteboardRestoreDelay = Duration.seconds(1)
     static let pasteSessionType = NSPasteboard.PasteboardType(
@@ -35,13 +40,31 @@ enum TextInjector {
     ]
 
     struct Target {
-        let element: AXUIElement
+        /// The focused text element at recording start. Nil when the app
+        /// does not expose one; delivery then relies on Command-V.
+        let element: AXUIElement?
         let processIdentifier: pid_t
+        let applicationName: String?
         let prefersPaste: Bool
     }
 
+    /// Why a transcript was left on the clipboard instead of being typed.
+    enum CopyReason: Equatable {
+        case accessibilityMissing
+        case noTarget
+        case targetChanged
+        case pasteFailed
+    }
+
+    /// Every delivery ends in exactly one of these, and each one is shown to
+    /// the user so they always know where the text went.
     enum Result: Equatable {
-        case inserted
+        /// Written into the captured text field through Accessibility.
+        case inserted(appName: String?)
+        /// Pasted with Command-V into the app that was dictated into.
+        case pasted(appName: String?)
+        /// Left on the clipboard for a manual Command-V.
+        case copied(CopyReason)
         case ignored
         case failed(String)
 
@@ -49,13 +72,53 @@ enum TextInjector {
             guard case let .failed(message) = self else { return nil }
             return message
         }
+
+        var isManualPaste: Bool {
+            if case .copied = self { return true }
+            return false
+        }
+
+        /// One short line for the on-screen notice.
+        var notice: String? {
+            switch self {
+            case let .inserted(name):
+                return name.map { "Inserted into \($0)" } ?? "Inserted"
+            case let .pasted(name):
+                return name.map { "Pasted into \($0)" } ?? "Pasted"
+            case .copied(.accessibilityMissing):
+                return "Copied · Allow Accessibility to paste automatically"
+            case .copied(.noTarget):
+                return "Copied · No text field was focused · Press ⌘V"
+            case .copied(.targetChanged):
+                return "Copied · You switched apps · Press ⌘V"
+            case .copied(.pasteFailed):
+                return "Copied · Automatic paste failed · Press ⌘V"
+            case .ignored:
+                return nil
+            case let .failed(message):
+                return message
+            }
+        }
     }
 
     /// Capturing the destination before recording prevents transient call and
     /// screen-sharing controls from stealing the insertion target while the
     /// transcript is being produced.
     static func captureTarget() -> Target? {
-        guard AXIsProcessTrusted() else { return nil }
+        let ownProcess = ProcessInfo.processInfo.processIdentifier
+        let frontmost = NSWorkspace.shared.frontmostApplication
+            .flatMap { $0.processIdentifier == ownProcess ? nil : $0 }
+
+        guard AXIsProcessTrusted() else {
+            return frontmost.map {
+                Target(
+                    element: nil,
+                    processIdentifier: $0.processIdentifier,
+                    applicationName: $0.localizedName,
+                    prefersPaste: true
+                )
+            }
+        }
 
         let system = AXUIElementCreateSystemWide()
         var focusedValue: CFTypeRef?
@@ -64,39 +127,96 @@ enum TextInjector {
             kAXFocusedUIElementAttribute as CFString,
             &focusedValue
         )
-        guard lookup == .success, let focusedValue else { return nil }
+        var processIdentifier: pid_t = 0
+        guard lookup == .success,
+              let focusedValue,
+              CFGetTypeID(focusedValue) == AXUIElementGetTypeID(),
+              AXUIElementGetPid(focusedValue as! AXUIElement, &processIdentifier) == .success,
+              // WhisprGo's own text fields (Settings) are valid targets; its
+              // buttons and menu-bar panel are not.
+              processIdentifier != ownProcess
+                || editableRoles.contains(stringAttribute(focusedValue as! AXUIElement, kAXRoleAttribute) ?? "")
+        else {
+            // Some apps never expose a focused element. Command-V into the
+            // same frontmost app is still the right delivery for them.
+            return frontmost.map {
+                Target(
+                    element: nil,
+                    processIdentifier: $0.processIdentifier,
+                    applicationName: $0.localizedName,
+                    prefersPaste: true
+                )
+            }
+        }
 
         let focused = focusedValue as! AXUIElement
-        var processIdentifier: pid_t = 0
-        guard AXUIElementGetPid(focused, &processIdentifier) == .success else { return nil }
-        let bundleIdentifier = NSRunningApplication(
-            processIdentifier: processIdentifier
-        )?.bundleIdentifier?.lowercased()
+        let application = NSRunningApplication(processIdentifier: processIdentifier)
+        let bundleIdentifier = application?.bundleIdentifier?.lowercased()
         let role = stringAttribute(focused, kAXRoleAttribute)
         let isKnownRichEditor = role == kAXTextAreaRole
             && bundleIdentifier.map(richEditorBundleIDs.contains) == true
         return Target(
             element: focused,
             processIdentifier: processIdentifier,
+            applicationName: application?.localizedName,
             prefersPaste: isKnownRichEditor || isInsideWebContent(focused)
         )
     }
 
+    /// Delivers a transcript. Types it into the captured field when possible,
+    /// pastes it into the same app when that app is still in front, and
+    /// otherwise leaves it on the clipboard. It never brings another app to
+    /// the front, so a transcript cannot land somewhere the user did not see.
     static func inject(_ text: String, into capturedTarget: Target? = nil) async -> Result {
         guard !text.isEmpty else { return .ignored }
         guard AXIsProcessTrusted() else {
-            return .failed("Text could not be inserted. Allow WhisprGo in Accessibility settings.")
+            return copyForManualPaste(text, reason: .accessibilityMissing)
         }
 
-        let target = capturedTarget ?? captureTarget()
-        if let target, !target.prefersPaste, insertDirectly(text, into: target.element) {
-            return .inserted
+        guard let target = capturedTarget ?? captureTarget() else {
+            return copyForManualPaste(text, reason: .noTarget)
+        }
+        if let element = target.element,
+           !target.prefersPaste,
+           insertDirectly(text, into: element) {
+            return .inserted(appName: target.applicationName)
         }
 
+        if let reason = pasteDecision(
+            targetProcess: target.processIdentifier,
+            frontmostProcess: NSWorkspace.shared.frontmostApplication?.processIdentifier
+        ) {
+            return copyForManualPaste(text, reason: reason)
+        }
         return await paste(text, into: target)
     }
 
-    private static func paste(_ text: String, into target: Target?) async -> Result {
+    /// Command-V only goes to the app the user dictated into, and only while
+    /// it is still in front.
+    static func pasteDecision(
+        targetProcess: pid_t,
+        frontmostProcess: pid_t?
+    ) -> CopyReason? {
+        frontmostProcess == targetProcess ? nil : .targetChanged
+    }
+
+    /// Puts the transcript on the clipboard and leaves it there.
+    private static func copyForManualPaste(_ text: String, reason: CopyReason) -> Result {
+        let pasteboard = NSPasteboard.general
+        restorePendingPasteboardIfOwned(on: pasteboard)
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        if let bundleIdentifier = Bundle.main.bundleIdentifier {
+            item.setString(bundleIdentifier, forType: sourceType)
+        }
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([item]) else {
+            return .failed("The transcript could not be copied. It is saved in History.")
+        }
+        return .copied(reason)
+    }
+
+    private static func paste(_ text: String, into target: Target) async -> Result {
         let pasteboard = NSPasteboard.general
         restorePendingPasteboardIfOwned(on: pasteboard)
         let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
@@ -119,34 +239,20 @@ enum TextInjector {
         }
         let ownedChangeCount = pasteboard.changeCount
 
-        if let target,
-           NSWorkspace.shared.frontmostApplication?.processIdentifier != target.processIdentifier {
-            guard let application = NSRunningApplication(
-                processIdentifier: target.processIdentifier
-            ), application.activate() else {
-                snapshot.restore(on: pasteboard, ifChangeCountIs: ownedChangeCount)
-                return .failed("The app you were dictating into is no longer available.")
-            }
-
-            // Activation is asynchronous. This is only paid on the uncommon
-            // fallback path where direct Accessibility insertion was rejected.
-            try? await Task.sleep(for: .milliseconds(70))
-        }
-
-        if let target {
+        if let element = target.element {
             _ = AXUIElementSetAttributeValue(
-                target.element,
+                element,
                 kAXFocusedAttribute as CFString,
                 kCFBooleanTrue
             )
-            // WebKit and Chromium commit focus asynchronously after their app
-            // or editor is reactivated.
+            // WebKit and Chromium commit focus asynchronously after their
+            // editor is refocused.
             try? await Task.sleep(for: .milliseconds(16))
         }
 
         guard await postPasteCommand() else {
-            snapshot.restore(on: pasteboard, ifChangeCountIs: ownedChangeCount)
-            return .failed("Text could not be inserted. Check Accessibility permission and try again.")
+            // Keep the transcript on the clipboard for a manual paste.
+            return copyForManualPaste(text, reason: .pasteFailed)
         }
 
         // Accessibility values in Chromium, WebKit, and rich editors can lag or
@@ -161,7 +267,7 @@ enum TextInjector {
             text: text,
             sessionID: sessionID
         )
-        return .inserted
+        return .pasted(appName: target.applicationName)
     }
 
     private static func restorePendingPasteboardIfOwned(on pasteboard: NSPasteboard) {

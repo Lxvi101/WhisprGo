@@ -189,6 +189,12 @@ actor TranscriptionRuntime {
         }
     }
 
+    /// Opens the cloud model's connection while the user speaks. Local models
+    /// need nothing.
+    func prewarm() {
+        if case let .openAI(client, _) = backend { client.prewarm() }
+    }
+
     func release() {
         desiredModelID = nil
         preparedModelID = nil

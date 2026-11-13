@@ -8,7 +8,8 @@ configured global shortcut edge
       ▼
                               ┌─ Fast ─► TranscriptionRuntime ─► Parakeet/Whisper/OpenAI ─────────────┐
 HotkeyMonitor ─► AudioCapture ┼─ Instruct Pro ─► TranscriptionRuntime ─► GPT-5.6 Luna cleanup ───────┼─► TextInjector
-                              └─ Gemini Pro ─► Gemini 3.5 Transcribe Smart (one pass) ───────────────┘
+                              ├─ Gemini Pro ─► trim + AAC inline ─► Gemini 3.5 Transcribe Smart ─────┤
+                              └─ ChatGPT ─► trim + AAC ─► chatgpt.com/backend-api/transcribe ────────┘
                        ▼
                RecordingOverlay
                (display-synced Core Animation)
@@ -20,14 +21,14 @@ captured buffer ──► HistoryPersistence actor ──► WAV + compact JSON 
 ## Lifecycle
 
 1. The app starts as a menu-bar accessory and installs one narrow CGEvent tap for modifier changes and configured key edges.
-2. In Fast Mode and Instruct Pro, the selected transcription model downloads automatically if needed, then loads and prewarms. Gemini Pro instead releases that runtime and waits for audio without preloading a model. The Pro engine choice is persisted and defaults to Instruct Pro.
-3. The persisted shortcut configuration maps key or modifier-only chords to five actions. Push-to-talk starts after a 40 ms modifier-chord disambiguation window and stops on release; all other actions fire once per press or tap. Defaults remain fn hold, fn + shift toggle, right Shift mode switching, right Control + right Shift profile cycling, and Command + Option + V for paste-last.
+2. In Fast Mode and Instruct Pro, the selected transcription model downloads automatically if needed, then loads and prewarms. Gemini Pro and ChatGPT Mode instead release that runtime and wait for audio without preloading a model. The Pro engine choice is persisted and defaults to Instruct Pro.
+3. The persisted shortcut configuration maps key or modifier-only chords to five actions. Push-to-talk starts after a 40 ms modifier-chord disambiguation window and stops on release; all other actions fire once per press or tap, except a modifier-only mode switch, which needs two releases within 0.45 seconds with no typing or other modifier in between. Defaults remain fn hold, fn + shift toggle, double-tap right Shift to cycle Fast → Pro → ChatGPT, right Control + right Shift profile cycling, and Command + Option + V for paste-last.
 4. The stop edge snapshots 16 kHz mono Float32 samples. Capture either stays active or releases the graph according to the explicit instant-response setting.
 5. Very short or silent buffers are discarded without inference.
 6. Delivered and retained durations are compared; incomplete capture never reaches a speech model.
 7. In Fast Mode, local audio goes to FluidAudio/Parakeet or WhisperKit; a selected OpenAI model receives a 16-bit WAV instead.
-8. In Instruct Pro, the selected Fast model produces a raw transcript and GPT-5.6 Luna cleans it using the selected profile plus bounded nearby text. If cleanup fails, WhisprGo inserts the raw transcript with a warning. In Gemini Pro, the 16-bit WAV goes directly to Gemini 3.5 Transcribe in Smart mode, while bounded nearby text and the selected profile are reduced to at most 100 custom-vocabulary hints.
-9. Text is inserted directly into the focused Accessibility element when supported, with Unicode CGEvents as the compatibility fallback.
+8. In Instruct Pro, the selected Fast model produces a raw transcript and GPT-5.6 Luna cleans it using the selected profile plus bounded nearby text. If cleanup fails, WhisprGo inserts the raw transcript with a warning. In Gemini Pro, silence around speech is trimmed and the audio is sent as 32 kbps AAC (ADTS) inline in a single request to Gemini 3.5 Transcribe in Smart mode, while bounded nearby text and the selected profile are reduced to at most 100 custom-vocabulary hints. If Google answers the inline request with 400, 413, or 415, the same request is repeated with a WAV uploaded through the Files API; once that succeeds, the client skips inline audio until the key changes or the app restarts. In ChatGPT Mode, silence around speech is trimmed, the audio is encoded as 32 kbps AAC, and it is uploaded with WhisprGo's own ChatGPT session. Recording start already opened the HTTPS connection and renewed a token close to expiry; a 401 renews once and retries.
+9. Delivery has exactly one outcome, always shown in a short notice: inserted into the captured Accessibility element; pasted with ⌘V into the same app while it is still frontmost; or left on the clipboard (Accessibility off, no target, the user switched apps, or ⌘V failed). WhisprGo never activates another app to paste. A ⌘V paste restores the previous clipboard after one second if nothing else changed it.
 10. After insertion completes, a utility-priority actor encodes the same immutable buffer to WAV and atomically updates a compact manifest. The newest 50 runs are retained.
 11. In always-active mode, an atomic gate discards idle callbacks before any conversion, buffering, or history persistence.
 
@@ -55,7 +56,7 @@ Users can explicitly enable **Keep microphone active between dictations**. In th
 
 Parakeet v3 uses one long-form worker to cap memory. Its multilingual long-form path disables the mel-context prepend that FluidAudio identifies as a source of decoder drift, and a system-language script hint prevents noisy audio from switching into an unrelated alphabet.
 
-Local model prewarming reduces first-dictation latency and peak Core ML specialization memory, at the cost of a longer one-time model preparation step. Cloud latency is network dependent; the client reuses a URLSession to preserve connection pooling between dictations.
+Local model prewarming reduces first-dictation latency and peak Core ML specialization memory, at the cost of a longer one-time model preparation step. Cloud latency is network dependent; each client reuses a URLSession to preserve connection pooling between dictations. When recording starts, every connection the release will need (ChatGPT, Gemini, OpenAI transcription, OpenAI cleanup) is opened with a credential-free HEAD request through that same session, so the request after release skips DNS, TCP, and TLS setup. Cloud audio is trimmed and AAC-encoded: M4A for OpenAI and ChatGPT, ADTS for Gemini.
 
 Instruct Pro's **Prepare Pro during pauses** option starts speculative work while recording with Phonon or Parakeet. The audio callback updates a small pause detector using its already-computed RMS; it performs no inference, network request, or snapshot allocation. A task polls every 200 ms and takes an independent audio copy after at least 450 ms of quiet. The copy is bounded to 30 seconds, with at most three attempts and at least three seconds of audio between attempts. Whisper and cloud ASR do not speculate. The original recording is never trimmed or segmented by this detector.
 
@@ -63,8 +64,12 @@ Each preview decodes locally, then starts one cleanup request. Repeated identica
 
 Speculation trades extra local computation and up to three early cleanup requests for less waiting after release. It is enabled by default and can be disabled in General settings. Draft transcript/context transmission can happen before cancellation; cancellation cannot retract data already sent. Speculative state is scoped to one recording. Continuous speech and recordings longer than 30 seconds use the normal final path if no draft matches, so there is no fixed latency guarantee.
 
-Gemini starts a utility task to delete its uploaded file after success, failure, or cancellation. Deletion remains best effort but no longer blocks delivery of text or errors. Live dictation timing starts before capture shutdown and records capture, waiting for canceled draft inference, final transcription, remaining cleanup, and insertion separately. General settings expose the breakdown, and the `com.whisprgo.app` / `Latency` log category contains durations and reuse status only.
+When Gemini falls back to the Files API, it starts a utility task to delete its uploaded file after success, failure, or cancellation. Deletion remains best effort but no longer blocks delivery of text or errors. Live dictation timing starts before capture shutdown and records capture, waiting for canceled draft inference, final transcription, remaining cleanup, and insertion separately. General settings expose the breakdown, and the `com.whisprgo.app` / `Latency` log category contains durations and reuse status only.
 
 The overlay does not observe an audio-level model. The real-time callback overwrites one C11 atomic Float, and a 60 fps maximum display link reads only the newest value. Prebuilt dot layers update inside disabled Core Animation transactions; no update can accumulate in a queue.
 
 History never runs alongside transcription by design. The engine injects the result and records latency first, then hands the immutable buffer to a serial utility actor. WAV conversion, disk writes, manifest pruning, playback, and saved-audio decoding therefore add no work to model inference or text insertion.
+
+## ChatGPT sign-in
+
+`ChatGPTOAuth` runs the authorization-code flow with PKCE against `auth.openai.com`, using the public client ID and `http://localhost:1455/auth/callback` redirect that the Codex CLI registers. A one-shot `NWListener` bound to the loopback interface receives the redirect, checks `state`, exchanges the code, and answers the browser. `ChatGPTAuth` stores the tokens as one Keychain item, keeps them in memory, and renews them over HTTPS five minutes before expiry with a single shared request. A rejected refresh token signs the account out. The session is independent of `~/.codex`, so renewing it never rotates a token that Codex CLI relies on.

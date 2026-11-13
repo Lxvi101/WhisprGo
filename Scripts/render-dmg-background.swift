@@ -16,11 +16,12 @@ guard let source = NSImage(contentsOf: sourceURL) else {
 }
 
 private let canvasSize = NSSize(width: 660, height: 400)
-private let waveformSource = NSRect(
-    x: 0,
-    y: source.size.height - 520,
-    width: source.size.width,
-    height: 520
+// The Speak → Type mark occupies the top 318 units of Assets/WhisprGo.svg.
+private let markSource = NSRect(
+    x: 258.25,
+    y: source.size.height - 318,
+    width: 430.5,
+    height: 318
 )
 
 private func makeRetinaBitmap(draw: () -> Void) -> NSBitmapImageRep {
@@ -57,20 +58,9 @@ private func drawBackground() {
     NSColor(calibratedWhite: 0.975, alpha: 1).setFill()
     NSRect(origin: .zero, size: canvasSize).fill()
 
-    // A very quiet full-size echo of the brand mark gives the window depth
-    // without competing with the Finder icons placed over it.
     source.draw(
-        in: NSRect(x: 40, y: 45, width: 580, height: 318),
-        from: waveformSource,
-        operation: .sourceOver,
-        fraction: 0.028,
-        respectFlipped: true,
-        hints: [.interpolation: NSImageInterpolation.high]
-    )
-
-    source.draw(
-        in: NSRect(x: 279, y: 304, width: 102, height: 56),
-        from: waveformSource,
+        in: NSRect(x: 307.5, y: 308, width: 45, height: 33.24),
+        from: markSource,
         operation: .sourceOver,
         fraction: 0.94,
         respectFlipped: true,

@@ -14,7 +14,7 @@ enum HotkeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .pushToTalk: "Push to talk"
         case .toggleDictation: "Start or stop dictation"
-        case .toggleMode: "Switch Fast / Pro Mode"
+        case .toggleMode: "Switch mode"
         case .cycleProfile: "Next Pro profile"
         case .pasteLast: "Paste last dictation"
         }
@@ -24,7 +24,7 @@ enum HotkeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .pushToTalk: "Hold this shortcut while speaking"
         case .toggleDictation: "Press once to start, then again to stop"
-        case .toggleMode: "Available while WhisprGo is idle"
+        case .toggleMode: "Cycles Fast, Pro, and ChatGPT while WhisprGo is idle. Modifier-only shortcuts need a double-tap so ordinary Shift presses never switch modes."
         case .cycleProfile: "Available in Pro Mode while idle"
         case .pasteLast: "Inserts the most recent completed dictation"
         }
@@ -32,6 +32,35 @@ enum HotkeyAction: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var firesModifierShortcutOnRelease: Bool {
         self == .toggleMode || self == .cycleProfile
+    }
+
+    /// A lone modifier such as Right Shift is pressed constantly while
+    /// typing. Switching modes from one requires two quick taps.
+    func requiresDoubleTap(_ shortcut: HotkeyShortcut) -> Bool {
+        guard self == .toggleMode, case .modifierChord = shortcut.trigger else { return false }
+        return true
+    }
+}
+
+/// Recognizes two releases of the same shortcut in quick succession.
+struct DoubleTapGate {
+    static let window: TimeInterval = 0.45
+
+    private var armedAt: TimeInterval?
+
+    /// Returns true on the second tap within the window. A first tap, or a
+    /// tap after the window lapsed, only arms the gate.
+    mutating func registerTap(at time: TimeInterval) -> Bool {
+        if let armedAt, time - armedAt <= Self.window, time >= armedAt {
+            self.armedAt = nil
+            return true
+        }
+        armedAt = time
+        return false
+    }
+
+    mutating func reset() {
+        armedAt = nil
     }
 }
 

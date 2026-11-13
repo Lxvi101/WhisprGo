@@ -8,7 +8,6 @@ import QuartzCore
 final class StartupAnimationController {
     static let shared = StartupAnimationController()
 
-    private let motion = StartupMotionPreset.production
     private var panel: NSPanel?
     private var dismissWorkItem: DispatchWorkItem?
 
@@ -19,7 +18,6 @@ final class StartupAnimationController {
         let reduceMotion = workspace.accessibilityDisplayShouldReduceMotion
         let content = StartupLogoView(
             frame: NSRect(x: 0, y: 0, width: 306, height: 244),
-            motion: motion,
             reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency
         )
         let panel = NSPanel(
@@ -55,7 +53,7 @@ final class StartupAnimationController {
         content.beginAnimation(reduceMotion: reduceMotion)
         panel.orderFrontRegardless()
 
-        let visibleDuration = reduceMotion ? 0.82 : motion.duration + 0.18
+        let visibleDuration = reduceMotion ? 0.82 : StartupMarkMotion.duration + 0.18
         let dismiss = DispatchWorkItem { [weak self, weak content] in
             guard let self else { return }
             content?.finishAnimation(reduceMotion: reduceMotion)
@@ -71,8 +69,7 @@ final class StartupAnimationController {
 
 @MainActor
 private final class StartupLogoView: NSVisualEffectView {
-    private static let designSize = CGSize(width: 950.16, height: 740.99)
-    private static let waveformHeight: CGFloat = 520
+    private static let designSize = StartupMarkGeometry.designSize
     private static let wordmarkHeight: CGFloat = 171.61
     private static let logoWidth: CGFloat = 270
     private static let materialMask = NSImage(
@@ -114,6 +111,8 @@ private final class StartupLogoView: NSVisualEffectView {
         }
         bitmap.size = pixelSize
 
+        // Drawing the whole lockup anchored at the bottom leaves only the
+        // wordmark inside this bitmap; the mark above it is built from layers.
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
         context.imageInterpolation = .high
@@ -135,16 +134,17 @@ private final class StartupLogoView: NSVisualEffectView {
         return bitmap.cgImage
     }()
 
-    private let motion: StartupMotionPreset
     private let reduceTransparency: Bool
-    private let dotsContainer = CALayer()
+    private let markContainer = CALayer()
+    private let voiceLayer = CAShapeLayer()
+    private let caretLayer = CAShapeLayer()
+    private var dropletLayers: [CAShapeLayer] = []
     private let wordmarkLayer = CALayer()
     private let wordmarkMask = CALayer()
-    private var dotLayers: [CAShapeLayer] = []
     private var designScale: CGFloat = 1
+    private var logoOrigin: CGPoint = .zero
 
-    init(frame frameRect: NSRect, motion: StartupMotionPreset, reduceTransparency: Bool) {
-        self.motion = motion
+    init(frame frameRect: NSRect, reduceTransparency: Bool) {
         self.reduceTransparency = reduceTransparency
         super.init(frame: frameRect)
         configureMaterial()
@@ -158,9 +158,8 @@ private final class StartupLogoView: NSVisualEffectView {
 
     func beginAnimation(reduceMotion: Bool) {
         guard let root = layer else { return }
-        root.removeAllAnimations()
-        wordmarkLayer.removeAllAnimations()
-        dotLayers.forEach { $0.removeAllAnimations() }
+        let markLayers: [CALayer] = [voiceLayer, caretLayer]
+        ([root, wordmarkLayer] + markLayers + dropletLayers).forEach { $0.removeAllAnimations() }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -168,17 +167,19 @@ private final class StartupLogoView: NSVisualEffectView {
         root.transform = CATransform3DIdentity
         wordmarkLayer.opacity = 1
         wordmarkLayer.transform = CATransform3DIdentity
-        dotLayers.forEach {
+        markLayers.forEach {
             $0.opacity = 1
             $0.transform = CATransform3DIdentity
         }
+        // Droplets only exist in flight; at rest they have been absorbed.
+        dropletLayers.forEach { $0.opacity = 0 }
         CATransaction.commit()
 
         let startTime = CACurrentMediaTime() + 0.02
         animateMaterialAppearance(root, beginTime: startTime, reduceMotion: reduceMotion)
         guard !reduceMotion else { return }
-        animateDots(beginTime: startTime)
-        animateWordmark(beginTime: startTime + motion.wordmarkDelay)
+        animateMark(beginTime: startTime)
+        animateWordmark(beginTime: startTime + StartupMarkMotion.wordmarkDelay)
     }
 
     func finishAnimation(reduceMotion: Bool) {
@@ -225,51 +226,66 @@ private final class StartupLogoView: NSVisualEffectView {
         updateAdaptiveColors()
     }
 
+    /// Converts a point in the lockup's design space (y down) to view space.
+    private func viewPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: logoOrigin.x + point.x * designScale,
+            y: logoOrigin.y + (Self.designSize.height - point.y) * designScale
+        )
+    }
+
     private func configureLayers() {
         guard let root = layer else { return }
         let scale = Self.logoWidth / Self.designSize.width
         designScale = scale
         let logoHeight = Self.designSize.height * scale
-        let logoOrigin = CGPoint(
+        logoOrigin = CGPoint(
             x: bounds.midX - Self.logoWidth / 2,
             y: bounds.midY - logoHeight / 2
-        )
-        let waveformOrigin = CGPoint(
-            x: logoOrigin.x,
-            y: logoOrigin.y + (Self.designSize.height - Self.waveformHeight) * scale
         )
         let backingScale = window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
 
-        dotsContainer.frame = bounds
-        dotsContainer.contentsScale = backingScale
-        root.addSublayer(dotsContainer)
+        markContainer.frame = bounds
+        markContainer.contentsScale = backingScale
+        root.addSublayer(markContainer)
 
-        dotLayers = StartupDotGeometry.dots.map { dot in
-            let sourcePath = dot.path
-            let sourceBounds = sourcePath.boundingBoxOfPath
-            let dotLayer = CAShapeLayer()
-            dotLayer.frame = CGRect(
-                x: waveformOrigin.x + sourceBounds.minX * scale,
-                y: waveformOrigin.y + (Self.waveformHeight - sourceBounds.maxY) * scale,
-                width: sourceBounds.width * scale,
-                height: sourceBounds.height * scale
-            )
-            var pathTransform = CGAffineTransform(
-                a: scale,
-                b: 0,
-                c: 0,
-                d: -scale,
-                tx: -sourceBounds.minX * scale,
-                ty: sourceBounds.maxY * scale
-            )
-            dotLayer.path = sourcePath.copy(using: &pathTransform)
-            dotLayer.contentsScale = backingScale
-            dotLayer.allowsEdgeAntialiasing = true
-            dotsContainer.addSublayer(dotLayer)
-            return dotLayer
+        // Droplets sit beneath the voice and the caret, so they bud out from
+        // behind one and slip into the other.
+        let dropletDiameter = StartupMarkGeometry.dropletRadius * 2 * scale
+        dropletLayers = StartupMarkMotion.droplets.map { _ in
+            let droplet = CAShapeLayer()
+            droplet.bounds = CGRect(x: 0, y: 0, width: dropletDiameter, height: dropletDiameter)
+            droplet.position = viewPoint(StartupMarkGeometry.voiceCenter)
+            droplet.path = CGPath(ellipseIn: droplet.bounds, transform: nil)
+            droplet.contentsScale = backingScale
+            droplet.opacity = 0
+            markContainer.addSublayer(droplet)
+            return droplet
         }
+
+        let voiceDiameter = StartupMarkGeometry.voiceRadius * 2 * scale
+        voiceLayer.bounds = CGRect(x: 0, y: 0, width: voiceDiameter, height: voiceDiameter)
+        voiceLayer.position = viewPoint(StartupMarkGeometry.voiceCenter)
+        voiceLayer.path = CGPath(ellipseIn: voiceLayer.bounds, transform: nil)
+        voiceLayer.contentsScale = backingScale
+        markContainer.addSublayer(voiceLayer)
+
+        let caretSize = CGSize(
+            width: StartupMarkGeometry.caretSize.width * scale,
+            height: StartupMarkGeometry.caretSize.height * scale
+        )
+        caretLayer.bounds = CGRect(origin: .zero, size: caretSize)
+        caretLayer.position = viewPoint(StartupMarkGeometry.caretCenter)
+        caretLayer.path = CGPath(
+            roundedRect: caretLayer.bounds,
+            cornerWidth: caretSize.width / 2,
+            cornerHeight: caretSize.width / 2,
+            transform: nil
+        )
+        caretLayer.contentsScale = backingScale
+        markContainer.addSublayer(caretLayer)
 
         wordmarkLayer.frame = CGRect(
             x: logoOrigin.x,
@@ -295,7 +311,7 @@ private final class StartupLogoView: NSVisualEffectView {
         root.backgroundColor = fill.cgColor
 
         let markColor = NSColor.labelColor.cgColor
-        dotLayers.forEach { $0.fillColor = markColor }
+        ([voiceLayer, caretLayer] + dropletLayers).forEach { $0.fillColor = markColor }
         wordmarkLayer.backgroundColor = markColor
     }
 
@@ -327,38 +343,67 @@ private final class StartupLogoView: NSVisualEffectView {
         root.add(settle, forKey: "materialize")
     }
 
-    private func animateDots(beginTime: CFTimeInterval) {
-        for (index, pair) in zip(StartupDotGeometry.dots.indices, zip(StartupDotGeometry.dots, dotLayers)) {
-            let (dot, dotLayer) = pair
-            let samples = motion.samples(for: dot, index: index)
-            let keyTimes = samples.map { NSNumber(value: $0.offset) }
+    private func animateMark(beginTime: CFTimeInterval) {
+        let times = StartupMarkMotion.sampleTimes
+        let keyTimes = times.map { NSNumber(value: $0 / StartupMarkMotion.duration) }
 
+        func run(_ layer: CALayer, _ samples: [StartupMarkSample], key: String) {
             let transform = CAKeyframeAnimation(keyPath: "transform")
             transform.values = samples.map { sample in
-                var value = CATransform3DMakeScale(
-                    CGFloat(sample.scale),
-                    CGFloat(sample.scale),
-                    1
-                )
+                var value = CATransform3DMakeScale(CGFloat(sample.scaleX), CGFloat(sample.scaleY), 1)
                 value.m41 = CGFloat(sample.translateX) * designScale
                 value.m42 = -CGFloat(sample.translateY) * designScale
                 return NSValue(caTransform3D: value)
             }
             transform.keyTimes = keyTimes
             transform.calculationMode = .linear
-            transform.beginTime = beginTime + motion.delay(for: dot)
-            transform.duration = motion.duration
+            transform.beginTime = beginTime
+            transform.duration = StartupMarkMotion.duration
             transform.fillMode = .backwards
-            dotLayer.add(transform, forKey: "motion")
+            layer.add(transform, forKey: key + ".motion")
 
             let opacity = CAKeyframeAnimation(keyPath: "opacity")
             opacity.values = samples.map { NSNumber(value: $0.opacity) }
             opacity.keyTimes = keyTimes
             opacity.calculationMode = .linear
-            opacity.beginTime = transform.beginTime
-            opacity.duration = transform.duration
+            opacity.beginTime = beginTime
+            opacity.duration = StartupMarkMotion.duration
             opacity.fillMode = .backwards
-            dotLayer.add(opacity, forKey: "reveal")
+            layer.add(opacity, forKey: key + ".opacity")
+        }
+
+        run(voiceLayer, times.map(StartupMarkMotion.voice(at:)), key: "voice")
+
+        // The caret grows by animating its path height rather than scaling
+        // the layer, so its round caps stay round the whole time.
+        let caretSamples = times.map(StartupMarkMotion.caret(at:))
+        run(caretLayer, caretSamples.map { sample in
+            var unscaled = sample
+            unscaled.scaleY = 1
+            return unscaled
+        }, key: "caret")
+        let caretBounds = caretLayer.bounds
+        let capRadius = caretBounds.width / 2
+        let caretPath = CAKeyframeAnimation(keyPath: "path")
+        caretPath.values = caretSamples.map { sample in
+            let height = max(caretBounds.width, caretBounds.height * CGFloat(sample.scaleY))
+            let rect = CGRect(
+                x: 0,
+                y: caretBounds.midY - height / 2,
+                width: caretBounds.width,
+                height: height
+            )
+            return CGPath(roundedRect: rect, cornerWidth: capRadius, cornerHeight: capRadius, transform: nil)
+        }
+        caretPath.keyTimes = keyTimes
+        caretPath.calculationMode = .linear
+        caretPath.beginTime = beginTime
+        caretPath.duration = StartupMarkMotion.duration
+        caretPath.fillMode = .backwards
+        caretLayer.add(caretPath, forKey: "caret.path")
+
+        for (index, droplet) in dropletLayers.enumerated() {
+            run(droplet, times.map { StartupMarkMotion.droplet(index, at: $0) }, key: "droplet")
         }
     }
 
@@ -385,313 +430,129 @@ private final class StartupLogoView: NSVisualEffectView {
     }
 }
 
-struct StartupMotionSample: Equatable {
-    let offset: Double
-    let opacity: Double
-    let translateX: Double
-    let translateY: Double
-    let scale: Double
+/// The Speak → Type mark in the design space of Assets/WhisprGo.svg (y down).
+enum StartupMarkGeometry {
+    static let designSize = CGSize(width: 950.16, height: 597.07)
+    static let voiceCenter = CGPoint(x: 384.25, y: 159)
+    static let voiceRadius: CGFloat = 126
+    static let caretCenter = CGPoint(x: 666.25, y: 159)
+    static let caretSize = CGSize(width: 45, height: 318)
+    static let dropletRadius: CGFloat = 30
 }
 
-/// Presets 01, 03, and 07 remain available without allocating anything at
-/// launch. Preset 06 is the production choice.
-enum StartupMotionPreset: CaseIterable {
-    case quietGather
-    case centerBloom
-    case lineWave
-    case bloomWave
+/// One frame of a layer's motion, relative to its resting layout. Translations
+/// are in design units (y down).
+struct StartupMarkSample: Equatable {
+    var opacity: Double
+    var translateX: Double
+    var translateY: Double
+    var scaleX: Double
+    var scaleY: Double
 
-    static let production: Self = .lineWave
+    static let resting = StartupMarkSample(opacity: 1, translateX: 0, translateY: 0, scaleX: 1, scaleY: 1)
+}
 
-    var duration: CFTimeInterval {
-        switch self {
-        case .quietGather: 0.68
-        case .centerBloom: 0.72
-        case .lineWave, .bloomWave: 2.85
+/// The launch sequence: the voice blooms, the caret grows, three words bud off
+/// the voice and fly into the caret (which kicks forward as each lands and then
+/// blinks once), and the wordmark rises in underneath.
+enum StartupMarkMotion {
+    struct Droplet {
+        let launch: Double
+        let targetOffsetY: Double
+        let arc: Double
+    }
+
+    static let duration: CFTimeInterval = 2.0
+    static let wordmarkDelay: CFTimeInterval = 0.95
+    static let flight = 0.46
+    static let droplets = [
+        Droplet(launch: 0.5, targetOffsetY: -62, arc: -70),
+        Droplet(launch: 0.62, targetOffsetY: 48, arc: 60),
+        Droplet(launch: 0.74, targetOffsetY: -8, arc: -40),
+    ]
+
+    /// 60 samples per second across the whole sequence.
+    static let sampleTimes: [Double] = {
+        let count = Int(duration * 60) + 1
+        return (0..<count).map { Double($0) / Double(count - 1) * duration }
+    }()
+
+    static func voice(at time: Double) -> StartupMarkSample {
+        guard time < duration else { return .resting }
+        let bloom = 0.18 + 0.82 * spring(time, response: 0.5, damping: 0.7)
+        // The voice gives a little of itself as the words leave it.
+        let give = 1 - 0.07 * sin(.pi * clamp((time - 0.48) / 0.6))
+        let scale = bloom * give
+        return StartupMarkSample(
+            opacity: smootherstep(time / 0.16),
+            translateX: 0,
+            translateY: 0,
+            scaleX: scale,
+            scaleY: scale
+        )
+    }
+
+    static func caret(at time: Double) -> StartupMarkSample {
+        guard time < duration else { return .resting }
+        let start = 0.22
+        let grow = 0.04 + 0.96 * spring(time - start, response: 0.42, damping: 0.8)
+        let kick = droplets.reduce(0) { total, droplet in
+            let since = time - (droplet.launch + flight)
+            guard since > 0 else { return total }
+            return total + 9 * (since / 0.06) * exp(1 - since / 0.06)
         }
+        let blinkOff = smootherstep((time - 1.42) / 0.04) * (1 - smootherstep((time - 1.72) / 0.04))
+        return StartupMarkSample(
+            opacity: smootherstep((time - start) / 0.08) * (1 - blinkOff),
+            translateX: kick,
+            translateY: 0,
+            scaleX: 1,
+            scaleY: grow
+        )
     }
 
-    var wordmarkDelay: CFTimeInterval {
-        switch self {
-        case .quietGather: 0.58
-        case .centerBloom: 0.6
-        case .lineWave: 1.56
-        case .bloomWave: 1.48
+    static func droplet(_ index: Int, at time: Double) -> StartupMarkSample {
+        let droplet = droplets[index]
+        let progress = (time - droplet.launch) / flight
+        guard progress > 0, progress < 1 else {
+            return StartupMarkSample(opacity: 0, translateX: 0, translateY: 0, scaleX: 0.5, scaleY: 0.5)
         }
+        let eased = progress * progress * (3 - 2 * progress)
+        let start = StartupMarkGeometry.voiceCenter
+        let end = CGPoint(
+            x: StartupMarkGeometry.caretCenter.x,
+            y: StartupMarkGeometry.caretCenter.y + droplet.targetOffsetY
+        )
+        let control = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 + droplet.arc)
+        let inverse = 1 - eased
+        let x = inverse * inverse * start.x + 2 * inverse * eased * control.x + eased * eased * end.x
+        let y = inverse * inverse * start.y + 2 * inverse * eased * control.y + eased * eased * end.y
+        let scale = (0.5 + 0.5 * smootherstep(progress / 0.2)) * (1 - 0.3 * smootherstep((progress - 0.55) / 0.3))
+            * (1 - 0.7 * smootherstep((progress - 0.85) / 0.15))
+        return StartupMarkSample(
+            opacity: 1 - smootherstep((progress - 0.86) / 0.14),
+            translateX: x - start.x,
+            translateY: y - start.y,
+            scaleX: scale,
+            scaleY: scale
+        )
     }
 
-    func delay(for dot: StartupDotGeometry.Dot) -> CFTimeInterval {
-        switch self {
-        case .quietGather:
-            0.032 + dot.radialDistance * 0.23
-        case .centerBloom:
-            0.02 + (1 - dot.radialDistance) * 0.15
-        case .lineWave, .bloomWave:
-            0.02
-        }
+    /// Step response of a spring released from rest at `time == 0`.
+    static func spring(_ time: Double, response: Double, damping: Double) -> Double {
+        guard time > 0 else { return 0 }
+        let omega = 2 * Double.pi / response
+        guard damping < 1 else { return 1 - exp(-omega * time) * (1 + omega * time) }
+        let root = (1 - damping * damping).squareRoot()
+        let damped = omega * root
+        return 1 - exp(-damping * omega * time)
+            * (cos(damped * time) + damping / root * sin(damped * time))
     }
 
-    func samples(for dot: StartupDotGeometry.Dot, index: Int) -> [StartupMotionSample] {
-        switch self {
-        case .quietGather:
-            quietGatherSamples(for: dot, index: index)
-        case .centerBloom:
-            centerBloomSamples(for: dot)
-        case .lineWave:
-            lineWaveSamples(for: dot)
-        case .bloomWave:
-            bloomWaveSamples(for: dot)
-        }
-    }
-
-    private func quietGatherSamples(
-        for dot: StartupDotGeometry.Dot,
-        index: Int
-    ) -> [StartupMotionSample] {
-        let pull = 0.27
-        let curl = index.isMultiple(of: 2) ? 0.055 : -0.055
-        let deltaX = Self.centerX - dot.centerX
-        let deltaY = Self.centerY - dot.centerY
-        return [
-            StartupMotionSample(
-                offset: 0,
-                opacity: 0,
-                translateX: deltaX * pull + deltaY * curl,
-                translateY: deltaY * pull - deltaX * curl,
-                scale: 0.28
-            ),
-            .resting,
-        ]
-    }
-
-    private func centerBloomSamples(for dot: StartupDotGeometry.Dot) -> [StartupMotionSample] {
-        [
-            StartupMotionSample(
-                offset: 0,
-                opacity: 0,
-                translateX: Self.centerX - dot.centerX,
-                translateY: Self.centerY - dot.centerY,
-                scale: 0.08
-            ),
-            .resting,
-        ]
-    }
-
-    private func lineWaveSamples(for dot: StartupDotGeometry.Dot) -> [StartupMotionSample] {
-        let durationSeconds = 2.85
-        let sampleCount = 86
-        let buildDelay = 0.08 + dot.xRatio * 1.12
-        let collapsedY = Self.centerY - dot.centerY
-
-        return (0..<sampleCount).map { index in
-            let offset = Double(index) / Double(sampleCount - 1)
-            let time = offset * durationSeconds
-            let build = Self.smootherstep((time - buildDelay) / 0.48)
-            let waveGate = Self.smootherstep((time - buildDelay) / 0.2)
-            let endTaper = 1 - Self.smootherstep((time - 2.08) / 0.72)
-            let phase = Double.pi * 2 * (time / 0.82 - dot.xRatio * 0.92)
-            let waveY = 48 * sin(phase) * waveGate * endTaper
-            return StartupMotionSample(
-                offset: offset,
-                opacity: Self.smootherstep((time - buildDelay) / 0.24),
-                translateX: 0,
-                translateY: collapsedY * (1 - build) + waveY,
-                scale: 0.1 + 0.9 * build
-            )
-        }
-    }
-
-    private func bloomWaveSamples(for dot: StartupDotGeometry.Dot) -> [StartupMotionSample] {
-        let durationSeconds = 2.85
-        let sampleCount = 86
-        let radialDelay = dot.radialDistance * 0.12
-        let collapsedX = Self.centerX - dot.centerX
-        let collapsedY = Self.centerY - dot.centerY
-        let spatialMode = sin(((dot.centerX - 9.68) / 930.59) * Double.pi * 3)
-
-        return (0..<sampleCount).map { index in
-            let offset = Double(index) / Double(sampleCount - 1)
-            let time = offset * durationSeconds
-            let bloom = Self.smootherstep((time - radialDelay) / 1.24)
-            let waveGate = Self.smootherstep((time - radialDelay) / 0.22)
-            let endTaper = 1 - Self.smootherstep((time - 2.02) / 0.78)
-            let oscillator = exp(-0.5 * time) * sin((Double.pi * 2 * time) / 0.94)
-            let waveY = 70 * spatialMode * waveGate * endTaper * oscillator * sqrt(bloom)
-            let reveal = Self.smootherstep((time - radialDelay * 0.3) / 0.34)
-            return StartupMotionSample(
-                offset: offset,
-                opacity: reveal * (0.16 + 0.84 * bloom),
-                translateX: collapsedX * (1 - bloom),
-                translateY: collapsedY * (1 - bloom) + waveY,
-                scale: 0.06 + 0.94 * bloom
-            )
-        }
-    }
-
-    private static let centerX = 475.08
-    private static let centerY = 241.0
+    private static func clamp(_ value: Double) -> Double { max(0, min(1, value)) }
 
     private static func smootherstep(_ value: Double) -> Double {
-        let time = max(0, min(1, value))
+        let time = clamp(value)
         return time * time * time * (time * (time * 6 - 15) + 10)
     }
-}
-
-private extension StartupMotionSample {
-    static let resting = StartupMotionSample(
-        offset: 1,
-        opacity: 1,
-        translateX: 0,
-        translateY: 0,
-        scale: 1
-    )
-}
-
-enum StartupDotGeometry {
-    enum Dot {
-        case ellipse(CGFloat, CGFloat, CGFloat, CGFloat)
-        case lowerCenterIrregular
-        case leftIrregular
-
-        var path: CGPath {
-            switch self {
-            case let .ellipse(x, y, radiusX, radiusY):
-                CGPath(ellipseIn: CGRect(
-                    x: x - radiusX,
-                    y: y - radiusY,
-                    width: radiusX * 2,
-                    height: radiusY * 2
-                ), transform: nil)
-            case .lowerCenterIrregular:
-                Self.makeLowerCenterPath()
-            case .leftIrregular:
-                Self.makeLeftPath()
-            }
-        }
-
-        var centerX: Double { Double(path.boundingBoxOfPath.midX) }
-        var centerY: Double { Double(path.boundingBoxOfPath.midY) }
-        var xRatio: Double { max(0, min(1, centerX / 950.16)) }
-        var radialDistance: Double {
-            let distance = hypot(centerX - 475.08, centerY - 241)
-            return max(0, min(1, distance / 500))
-        }
-
-        private static func makeLowerCenterPath() -> CGPath {
-            let path = CGMutablePath()
-            path.move(to: CGPoint(x: 305.55, y: 347.51))
-            path.addCurve(
-                to: CGPoint(x: 326.10, y: 354.96),
-                control1: CGPoint(x: 313.94, y: 344.07),
-                control2: CGPoint(x: 323.33, y: 347.86)
-            )
-            path.addCurve(
-                to: CGPoint(x: 317.98, y: 375.49),
-                control1: CGPoint(x: 329.15, y: 362.79),
-                control2: CGPoint(x: 326.00, y: 372.50)
-            )
-            path.addCurve(
-                to: CGPoint(x: 298.18, y: 369.06),
-                control1: CGPoint(x: 311.04, y: 378.08),
-                control2: CGPoint(x: 301.76, y: 375.69)
-            )
-            path.addCurve(
-                to: CGPoint(x: 305.55, y: 347.50),
-                control1: CGPoint(x: 294.15, y: 361.58),
-                control2: CGPoint(x: 296.17, y: 351.34)
-            )
-            path.closeSubpath()
-            return path
-        }
-
-        private static func makeLeftPath() -> CGPath {
-            let path = CGMutablePath()
-            path.move(to: CGPoint(x: 112.51, y: 335.85))
-            path.addCurve(
-                to: CGPoint(x: 103.66, y: 323.12),
-                control1: CGPoint(x: 107.73, y: 334.35),
-                control2: CGPoint(x: 103.52, y: 327.46)
-            )
-            path.addCurve(
-                to: CGPoint(x: 113.07, y: 308.52),
-                control1: CGPoint(x: 103.85, y: 317.02),
-                control2: CGPoint(x: 106.85, y: 310.68)
-            )
-            path.addCurve(
-                to: CGPoint(x: 129.03, y: 313.48),
-                control1: CGPoint(x: 118.86, y: 306.51),
-                control2: CGPoint(x: 126.28, y: 308.86)
-            )
-            path.addCurve(
-                to: CGPoint(x: 129.89, y: 329.73),
-                control1: CGPoint(x: 131.78, y: 318.10),
-                control2: CGPoint(x: 132.40, y: 325.44)
-            )
-            path.addCurve(
-                to: CGPoint(x: 112.52, y: 335.85),
-                control1: CGPoint(x: 126.71, y: 335.17),
-                control2: CGPoint(x: 119.53, y: 338.05)
-            )
-            path.closeSubpath()
-            return path
-        }
-    }
-
-    static let dots: [Dot] = [
-        .ellipse(441.91, 182.92, 18.07, 18.05),
-        .ellipse(441.99, 239.62, 17.97, 17.95),
-        .ellipse(508.02, 241.58, 17.89, 17.87),
-        .ellipse(312.25, 303.29, 17.77, 17.75),
-        .ellipse(573.83, 300.89, 17.71, 17.69),
-        .ellipse(507.89, 298.68, 17.66, 17.64),
-        .ellipse(641.20, 359.52, 17.56, 17.54),
-        .ellipse(377.19, 243.81, 17.58, 17.56),
-        .ellipse(641.12, 305.49, 17.37, 17.35),
-        .ellipse(247.23, 305.28, 17.33, 17.31),
-        .ellipse(376.87, 185.77, 17.33, 17.31),
-        .ellipse(508.35, 185.09, 17.33, 17.31),
-        .ellipse(573.86, 356.63, 17.23, 17.22),
-        .ellipse(181.53, 305.62, 17.21, 17.19),
-        .ellipse(442.16, 125.80, 16.71, 16.69),
-        .ellipse(708.70, 316.69, 16.44, 16.43),
-        .ellipse(708.43, 260.81, 16.13, 16.11),
-        .ellipse(312.33, 246.54, 16.10, 16.08),
-        .ellipse(181.31, 245.48, 15.85, 15.83),
-        .lowerCenterIrregular,
-        .ellipse(573.90, 245.12, 15.12, 15.10),
-        .ellipse(771.13, 234.20, 14.89, 14.87),
-        .ellipse(247.42, 246.58, 14.81, 14.79),
-        .ellipse(831.88, 271.78, 14.74, 14.73),
-        .ellipse(508.77, 128.33, 14.61, 14.60),
-        .ellipse(641.40, 413.91, 14.43, 14.42),
-        .ellipse(441.84, 67.85, 14.25, 14.23),
-        .leftIrregular,
-        .ellipse(181.00, 365.82, 14.17, 14.15),
-        .ellipse(770.95, 300.49, 14.14, 14.12),
-        .ellipse(508.25, 355.09, 14.01, 13.99),
-        .ellipse(376.59, 129.38, 14.08, 14.07),
-        .ellipse(247.09, 360.65, 13.84, 13.82),
-        .ellipse(887.93, 301.25, 13.68, 13.66),
-        .ellipse(63.54, 279.26, 13.57, 13.56),
-        .ellipse(574.14, 413.34, 13.63, 13.61),
-        .ellipse(831.93, 331.30, 13.23, 13.21),
-        .ellipse(181.10, 180.49, 13.00, 12.98),
-        .ellipse(708.08, 362.67, 12.58, 12.56),
-        .ellipse(117.39, 275.80, 12.54, 12.53),
-        .ellipse(116.87, 230.67, 12.41, 12.40),
-        .ellipse(708.46, 186.50, 11.79, 11.78),
-        .ellipse(247.28, 420.05, 11.80, 11.79),
-        .ellipse(376.86, 299.12, 11.18, 11.17),
-        .ellipse(574.55, 186.65, 11.20, 11.19),
-        .ellipse(641.21, 471.51, 10.93, 10.92),
-        .ellipse(573.98, 471.48, 10.88, 10.87),
-        .ellipse(641.06, 245.36, 10.85, 10.84),
-        .ellipse(441.94, 10.78, 10.79, 10.78),
-        .ellipse(376.31, 70.57, 10.59, 10.58),
-        .ellipse(508.56, 413.69, 10.48, 10.47),
-        .ellipse(508.57, 70.05, 10.47, 10.46),
-        .ellipse(312.44, 189.03, 9.85, 9.84),
-        .ellipse(940.27, 299.86, 9.89, 9.88),
-        .ellipse(9.68, 297.80, 9.68, 9.66),
-    ]
 }

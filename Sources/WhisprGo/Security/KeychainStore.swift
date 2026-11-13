@@ -6,6 +6,7 @@ enum KeychainStore {
     private static let legacyService = "com.whisprflow.credentials"
     private static let openAIAccount = "openai-api-key"
     private static let googleAccount = "google-api-key"
+    private static let chatGPTAccount = "chatgpt-session"
 
     static func openAIAPIKey() -> String? {
         if let saved = read(account: openAIAccount, service: service) {
@@ -50,7 +51,25 @@ enum KeychainStore {
         }
     }
 
+    /// The ChatGPT sign-in as JSON. Tokens never leave Keychain except in
+    /// memory for requests to OpenAI.
+    static func chatGPTSessionData() -> Data? {
+        readData(account: chatGPTAccount, service: service)
+    }
+
+    static func saveChatGPTSessionData(_ data: Data?) throws {
+        if let data {
+            try save(data, account: chatGPTAccount, service: service)
+        } else {
+            try delete(account: chatGPTAccount, service: service)
+        }
+    }
+
     private static func read(account: String, service: String) -> String? {
+        readData(account: account, service: service).flatMap { String(data: $0, encoding: .utf8) }
+    }
+
+    private static func readData(account: String, service: String) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -66,16 +85,19 @@ enum KeychainStore {
         else {
             return nil
         }
-        return String(data: data, encoding: .utf8)
+        return data
     }
 
     private static func save(_ value: String, account: String, service: String) throws {
+        try save(Data(value.utf8), account: account, service: service)
+    }
+
+    private static func save(_ data: Data, account: String, service: String) throws {
         let lookup: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        let data = Data(value.utf8)
         let update: [String: Any] = [kSecValueData as String: data]
 
         let status = SecItemUpdate(lookup as CFDictionary, update as CFDictionary)

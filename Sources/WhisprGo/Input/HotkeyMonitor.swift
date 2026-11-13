@@ -173,6 +173,7 @@ final class HotkeyMonitor {
     private var pendingPushToTalk: DispatchWorkItem?
     private var pushToTalkIsActive = false
     private var pushToTalkWasConsumed = false
+    private var modeSwitchTaps = DoubleTapGate()
 
     func start(
         configuration: HotkeyConfiguration,
@@ -324,10 +325,19 @@ final class HotkeyMonitor {
                     && action.firesModifierShortcutOnRelease
                 modifierReleaseCandidates.remove(action)
                 if shouldFire {
+                    if action.requiresDoubleTap(configuration[action]),
+                       !modeSwitchTaps.registerTap(at: ProcessInfo.processInfo.systemUptime) {
+                        continue
+                    }
                     consumePushToTalkIfNeeded()
                     perform(action)
                 }
             }
+        }
+
+        // Any other modifier pressed between taps breaks a double-tap.
+        if changedKeyIsDown, !nowActive.contains(.toggleMode) {
+            modeSwitchTaps.reset()
         }
 
         for action in nowActive.subtracting(previouslyActive) {
@@ -355,6 +365,9 @@ final class HotkeyMonitor {
         isRepeat: Bool
     ) -> Bool {
         modifierReleaseCandidates.removeAll()
+        // Typing between taps (for example Shift for a capital) is not a
+        // double-tap.
+        modeSwitchTaps.reset()
         guard let action = Self.keyShortcutAction(
             configuration: configuration,
             keyCode: keyCode,
@@ -493,6 +506,7 @@ final class HotkeyMonitor {
         modifierReleaseCandidates.removeAll()
         suppressedKeyCodes.removeAll()
         pushToTalkWasConsumed = false
+        modeSwitchTaps.reset()
     }
 }
 

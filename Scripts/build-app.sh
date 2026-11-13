@@ -18,7 +18,7 @@ cp "$BIN_DIR/WhisprGo" "$CONTENTS_DIR/MacOS/WhisprGo"
 cp "$PROJECT_DIR/Packaging/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$PROJECT_DIR/Packaging/AppIcon.icns" "$CONTENTS_DIR/Resources/AppIcon.icns"
 cp "$PROJECT_DIR/Assets/WhisprGo.svg" "$CONTENTS_DIR/Resources/WhisprGo.svg"
-cp "$PROJECT_DIR/Packaging/WaveformMark.png" "$CONTENTS_DIR/Resources/WaveformMark.png"
+cp "$PROJECT_DIR/Packaging/BrandMark.png" "$CONTENTS_DIR/Resources/BrandMark.png"
 cp "$PROJECT_DIR/Packaging/MenuBarIconTemplate.png" "$CONTENTS_DIR/Resources/MenuBarIconTemplate.png"
 
 # Keep dependency resource bundles inside the conventional signed Resources

@@ -87,7 +87,12 @@ private final class GeminiCleanupURLProtocol: URLProtocol, @unchecked Sendable {
         case "/upload-session/test":
             respond(#"{"file":{"name":"files/test","uri":"https://generativelanguage.googleapis.com/v1beta/files/test","mimeType":"audio/wav"}}"#)
         case "/v1beta/interactions":
-            if server.failInteraction {
+            // These tests cover the Files API flow, which runs when Google
+            // refuses inline audio.
+            if let body = try? ProModeURLProtocol.body(for: request),
+               String(decoding: body, as: UTF8.self).contains(#""data":"#) {
+                respond(#"{"error":{"message":"Inline audio is not supported."}}"#, status: 400)
+            } else if server.failInteraction {
                 respond(#"{"error":{"message":"Unavailable"}}"#, status: 503)
             } else {
                 respond(#"{"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Ready."}]}]}"#)

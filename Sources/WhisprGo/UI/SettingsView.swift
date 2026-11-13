@@ -15,7 +15,7 @@ enum SettingsTab: Hashable, CaseIterable {
         case .models: return "Models"
         case .profiles: return "Profiles"
         case .history: return "History"
-        case .providers: return "API Keys"
+        case .providers: return "Accounts"
         }
     }
 
@@ -25,7 +25,7 @@ enum SettingsTab: Hashable, CaseIterable {
         case .models: return "waveform"
         case .profiles: return "text.quote"
         case .history: return "clock"
-        case .providers: return "key"
+        case .providers: return "person.crop.circle"
         }
     }
 }
@@ -99,8 +99,8 @@ private struct SettingsSidebar: View {
                 item(tab)
             }
             Spacer()
-            BrandWaveform()
-                .frame(width: 34, height: 19)
+            BrandMark()
+                .frame(width: 22, height: 16)
                 .foregroundStyle(Signal.textTertiary)
                 .padding(.bottom, 18)
         }
@@ -218,8 +218,8 @@ private struct HistorySettingsPane: View {
 private struct HistoryEmptyState: View {
     var body: some View {
         VStack(spacing: 12) {
-            BrandWaveform()
-                .frame(width: 88, height: 48)
+            BrandMark()
+                .frame(width: 54, height: 40)
                 .foregroundStyle(Signal.textTertiary)
             Text("No dictations yet")
                 .font(.system(size: 13))
@@ -1138,6 +1138,8 @@ private struct ProviderSettingsPane: View {
     var body: some View {
         SettingsPaneContainer {
             Form {
+                ChatGPTAccountSection(engine: engine)
+
                 Section("Google Gemini") {
                     ProviderKeyRow(
                         placeholder: "Paste from Google AI Studio",
@@ -1165,7 +1167,7 @@ private struct ProviderSettingsPane: View {
                 }
 
                 Section {
-                    Text("Keys are stored in macOS Keychain. Fast Mode with a local model stays on this Mac. Instruct Pro sends its transcript and enabled nearby text to OpenAI. Gemini Pro uploads the recording to Google with vocabulary hints and requests deletion afterwards. WhisprGo never captures screenshots.")
+                    Text("Keys and the ChatGPT sign-in are stored in macOS Keychain. Fast Mode with a local model stays on this Mac. ChatGPT Mode uploads the recording to ChatGPT under your account; ChatGPT reports keeping uploaded dictation audio for up to 30 days. Instruct Pro sends its transcript and enabled nearby text to OpenAI. Gemini Pro uploads the recording to Google with vocabulary hints and requests deletion afterwards. WhisprGo never captures screenshots.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
@@ -1197,6 +1199,52 @@ private struct ProviderSettingsPane: View {
             if savedProvider == provider {
                 savedProvider = nil
             }
+        }
+    }
+}
+
+private struct ChatGPTAccountSection: View {
+    @ObservedObject var engine: DictationEngine
+
+    var body: some View {
+        Section {
+            if let account = engine.chatGPTAccount {
+                LabeledContent("Signed in") {
+                    Text(account.email ?? "ChatGPT account")
+                        .textSelection(.enabled)
+                }
+                if let plan = account.planTitle {
+                    LabeledContent("Plan", value: plan)
+                }
+                HStack {
+                    Spacer()
+                    Button("Sign Out", role: .destructive, action: engine.signOutOfChatGPT)
+                        .disabled(engine.activity != .idle)
+                }
+            } else if engine.isSigningInToChatGPT {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Finish signing in in your browser…")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel", action: engine.cancelChatGPTSignIn)
+                }
+            } else {
+                HStack {
+                    Text("Use your ChatGPT plan for ChatGPT Mode. No API key needed.")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Sign in with ChatGPT", action: engine.signInToChatGPT)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+        } header: {
+            Text("ChatGPT")
+        } footer: {
+            Text("Sign-in opens auth.openai.com in your browser. WhisprGo keeps its own session and never reads or changes Codex CLI sign-ins. ChatGPT Mode uses a private ChatGPT endpoint, so OpenAI may change or limit it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

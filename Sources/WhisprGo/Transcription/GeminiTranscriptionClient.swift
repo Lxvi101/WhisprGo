@@ -1,12 +1,31 @@
 import Foundation
 
-final class GeminiTranscriptionClient {
+/// Transcribes Pro dictation with Gemini.
+///
+/// Latency work, in order of impact:
+/// - The audio is sent inline with the transcription request: one round trip
+///   instead of a resumable upload (two requests) followed by the request.
+///   Google also keeps no uploaded file, so there is nothing to delete.
+/// - Audio is 32 kbps AAC (ADTS) instead of WAV, and silence before and after
+///   speech is trimmed first.
+/// - `prewarm()` opens the TLS connection while the user is still speaking.
+///
+/// If Google rejects inline audio, the request is repeated through the Files
+/// API with WAV (the original flow), and later dictations go straight there.
+final class GeminiTranscriptionClient: @unchecked Sendable {
     static let model = "gemini-3.5-transcribe"
+
+    /// Inline requests are limited in size. Longer recordings use the upload.
+    static let inlineAudioLimit = 14 * 1_024 * 1_024
+
+    /// Statuses that mean the inline form itself was refused, so the Files API
+    /// may still succeed.
+    static let inlineRejectionStatuses: Set<Int> = [400, 413, 415]
 
     private let uploadEndpoint = URL(
         string: "https://generativelanguage.googleapis.com/upload/v1beta/files"
     )!
-    private let interactionEndpoint = URL(
+    private static let interactionEndpoint = URL(
         string: "https://generativelanguage.googleapis.com/v1beta/interactions"
     )!
     private let filesEndpoint = URL(
@@ -14,28 +33,59 @@ final class GeminiTranscriptionClient {
     )!
     private let apiKey: String
     private let session: URLSession
+    private let warmer: ConnectionWarmer
+    private let lock = NSLock()
+    private var inlineAudioRejected = false
 
     init(apiKey: String, session: URLSession? = nil) {
         self.apiKey = apiKey
-        if let session {
-            self.session = session
-        } else {
+        let session = session ?? {
             let configuration = URLSessionConfiguration.ephemeral
             configuration.timeoutIntervalForRequest = 60
             configuration.timeoutIntervalForResource = 120
             configuration.waitsForConnectivity = false
             configuration.httpMaximumConnectionsPerHost = 1
+            configuration.httpShouldSetCookies = false
             configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-            self.session = URLSession(configuration: configuration)
-        }
+            return URLSession(configuration: configuration)
+        }()
+        self.session = session
+        warmer = ConnectionWarmer(url: Self.interactionEndpoint, session: session)
+    }
+
+    /// Opens the HTTPS connection ahead of the request. The HEAD carries no
+    /// API key.
+    func prewarm() {
+        warmer.warm()
     }
 
     func transcribe(
         samples: [Float],
         customVocabulary: [String]
     ) async throws -> String {
-        let wav = WAVEncoder.encode(samples: samples)
-        let file = try await upload(wav)
+        let vocabulary = Array(customVocabulary.prefix(100))
+        let speech = SpeechTrimmer.trim(samples)
+
+        var inlineWasRejected = false
+        if !usesUploadOnly {
+            let audio = (try? CompressedAudioEncoder.encodeADTS(samples: speech))
+                ?? CompressedAudioEncoder.wav(samples: speech)
+            try Task.checkCancellation()
+            if audio.data.count <= Self.inlineAudioLimit {
+                do {
+                    return try await createInteraction(
+                        input: .inline(audio),
+                        customVocabulary: vocabulary
+                    )
+                } catch let GeminiTranscriptionError.http(status, _)
+                    where Self.inlineRejectionStatuses.contains(status) {
+                    inlineWasRejected = true
+                }
+            }
+        }
+
+        try Task.checkCancellation()
+        let file = try await upload(WAVEncoder.encode(samples: speech))
         defer {
             // Cleanup is still attempted on success, failure, and cancellation,
             // but a slow DELETE must not hold back finished text. Detached so
@@ -44,10 +94,26 @@ final class GeminiTranscriptionClient {
                 await delete(file)
             }
         }
-        return try await createInteraction(
-            file: file,
-            customVocabulary: Array(customVocabulary.prefix(100))
+        let text = try await createInteraction(
+            input: .init(type: "audio", uri: file.uri, data: nil, mimeType: file.mimeType),
+            customVocabulary: vocabulary
         )
+        // Only a rejection that the upload then got past proves inline audio
+        // is the problem. Skip the extra round trip from now on.
+        if inlineWasRejected { markInlineAudioRejected() }
+        return text
+    }
+
+    private var usesUploadOnly: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return inlineAudioRejected
+    }
+
+    private func markInlineAudioRejected() {
+        lock.lock()
+        inlineAudioRejected = true
+        lock.unlock()
     }
 
     private func upload(_ data: Data) async throws -> GeminiFile {
@@ -95,17 +161,20 @@ final class GeminiTranscriptionClient {
     }
 
     private func createInteraction(
-        file: GeminiFile,
+        input: InteractionRequest.Input,
         customVocabulary: [String]
     ) async throws -> String {
-        var request = URLRequest(url: interactionEndpoint)
+        var request = URLRequest(url: Self.interactionEndpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 60
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(InteractionRequest(
+        let encoder = JSONEncoder()
+        // Base64 audio is full of slashes. Escaping them only adds bytes.
+        encoder.outputFormatting = .withoutEscapingSlashes
+        request.httpBody = try encoder.encode(InteractionRequest(
             model: Self.model,
-            input: [.init(type: "audio", uri: file.uri, mimeType: file.mimeType)],
+            input: [input],
             generationConfig: .init(
                 transcriptionConfig: .init(
                     customVocabulary: customVocabulary.isEmpty ? nil : customVocabulary,
@@ -157,8 +226,9 @@ final class GeminiTranscriptionClient {
         guard (200..<300).contains(http.statusCode) else {
             let message = (try? JSONDecoder().decode(GoogleErrorEnvelope.self, from: data))?
                 .error.message
-            throw GeminiTranscriptionError.remote(
-                message ?? "Google returned HTTP \(http.statusCode)."
+            throw GeminiTranscriptionError.http(
+                status: http.statusCode,
+                message: message ?? "Google returned HTTP \(http.statusCode)."
             )
         }
         return http
@@ -244,14 +314,27 @@ private struct GeminiFile: Decodable {
 }
 
 private struct InteractionRequest: Encodable {
+    /// Audio is either a Files API reference (`uri`) or base64 `data`.
+    /// The unused one is omitted from the JSON.
     struct Input: Encodable {
         let type: String
-        let uri: String
+        let uri: String?
+        let data: String?
         let mimeType: String
+
+        static func inline(_ audio: CompressedAudioEncoder.Encoded) -> Self {
+            Input(
+                type: "audio",
+                uri: nil,
+                data: audio.data.base64EncodedString(),
+                mimeType: audio.contentType
+            )
+        }
 
         enum CodingKeys: String, CodingKey {
             case type
             case uri
+            case data
             case mimeType = "mime_type"
         }
     }
@@ -310,6 +393,7 @@ enum GeminiTranscriptionError: LocalizedError {
     case invalidUploadResponse
     case invalidResponse
     case emptyOutput
+    case http(status: Int, message: String)
     case remote(String)
 
     var errorDescription: String? {
@@ -322,7 +406,7 @@ enum GeminiTranscriptionError: LocalizedError {
             return "Gemini returned an invalid transcription response."
         case .emptyOutput:
             return "Gemini completed the request but returned no transcript."
-        case let .remote(message):
+        case let .http(_, message), let .remote(message):
             return message
         }
     }

@@ -3,6 +3,7 @@ import Foundation
 enum DictationMode: String, CaseIterable, Identifiable, Sendable {
     case fast
     case pro
+    case chatGPT
 
     var id: Self { self }
 
@@ -10,6 +11,7 @@ enum DictationMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .fast: return "Fast"
         case .pro: return "Pro"
+        case .chatGPT: return "ChatGPT"
         }
     }
 
@@ -19,7 +21,15 @@ enum DictationMode: String, CaseIterable, Identifiable, Sendable {
             return "Types the transcription immediately. No cleanup model or context reading."
         case .pro:
             return "Polishes dictation with the Pro engine selected in Settings."
+        case .chatGPT:
+            return "Sends the recording to ChatGPT with your ChatGPT sign-in. No API key or local model."
         }
+    }
+
+    /// The mode the switch shortcut moves to next.
+    var next: Self {
+        let all = Self.allCases
+        return all[(all.firstIndex(of: self)! + 1) % all.count]
     }
 }
 
