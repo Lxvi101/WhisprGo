@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhisprGo Mark Concepts</title>
+<style>
+  :root {
+    --bg: #FAFAFA; --fg: #050506; --muted: #6E6E73; --line: rgba(0,0,0,.09); --card: #FFFFFF;
+    --chip: rgba(0,0,0,.05); --chip-on: #050506; --chip-on-fg: #FAFAFA;
+    --t-bg0: #1E1E21; --t-bg1: #050506; --t-rim: rgba(255,255,255,.08);
+    --d0: #FFFFFF; --d1: #F5F5F7; --d2: #B4B4BA;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #050506; --fg: #F5F5F7; --muted: #8E8E93; --line: rgba(255,255,255,.09); --card: #0E0E10;
+      --chip: rgba(255,255,255,.07); --chip-on: #F5F5F7; --chip-on-fg: #050506;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #050506; --fg: #F5F5F7; --muted: #8E8E93; --line: rgba(255,255,255,.09); --card: #0E0E10;
+    --chip: rgba(255,255,255,.07); --chip-on: #F5F5F7; --chip-on-fg: #050506;
+  }
+  body.paper {
+    --t-bg0: #FFFFFF; --t-bg1: #E8E8EC; --t-rim: rgba(0,0,0,.06);
+    --d0: #4A4A50; --d1: #1A1A1D; --d2: #050506;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px; }
+  header h1 { font: 600 34px/1.1 -apple-system, "SF Pro Display", sans-serif; letter-spacing: -.02em; margin: 0 0 8px; }
+  header p { color: var(--muted); margin: 0; max-width: 680px; }
+  .bar {
+    position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid var(--line); margin: 28px -24px 0; padding: 12px 24px;
+    display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+  }
+  .seg { display: inline-flex; background: var(--chip); border-radius: 999px; padding: 3px; gap: 2px; }
+  .seg button {
+    border: 0; background: transparent; color: var(--fg); font: 500 13px/1 inherit; font-family: inherit;
+    padding: 7px 12px; border-radius: 999px; cursor: pointer; transition: background .2s, color .2s;
+  }
+  .seg button.on { background: var(--chip-on); color: var(--chip-on-fg); }
+  .lbl { font: 500 11px/1 "SF Mono", ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-right: 6px; }
+  .grp { display: inline-flex; align-items: center; }
+  .readout { margin-left: auto; font: 500 12px/1 "SF Mono", ui-monospace, Menlo, monospace; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .readout .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .2s; }
+  .readout.live .dot { background: var(--fg); }
+
+  .concept {
+    display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); gap: 40px;
+    padding: 48px 0; border-bottom: 1px solid var(--line);
+  }
+  .stage { position: relative; user-select: none; -webkit-user-select: none; cursor: pointer; touch-action: none; }
+  .stage svg { width: 100%; height: auto; display: block; filter: drop-shadow(0 18px 30px rgba(0,0,0,.22)); }
+  .stage .hint { text-align: center; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .eyebrow { font: 500 11px/1 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .info h2 { font: 600 28px/1.15 -apple-system, "SF Pro Display", sans-serif; letter-spacing: -.015em; margin: 8px 0 10px; }
+  .info > p { margin: 0 0 18px; max-width: 620px; }
+  .states { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin: 0 0 22px; padding: 0; list-style: none; }
+  .states li { font-size: 12.5px; line-height: 1.4; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; transition: color .25s, border-color .25s; }
+  .states li b { display: block; color: var(--fg); font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+  .states li.on { color: var(--fg); border-color: var(--fg); }
+  .row { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-end; margin-bottom: 20px; }
+  .size { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .size svg { display: block; }
+  .size span, .cap { font: 500 10.5px/1 "SF Mono", ui-monospace, Menlo, monospace; color: var(--muted); letter-spacing: .04em; }
+  .menubars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .mb { height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 12px; font: 500 12.5px/1 -apple-system, sans-serif; }
+  .mb.dark { background: #1C1C1E; color: #fff; }
+  .mb.light { background: #ECECEE; color: #000; border: 1px solid rgba(0,0,0,.06); }
+  .mb .ico { height: 16px; display: flex; align-items: center; padding: 3px 5px; border-radius: 4px; }
+  .mb .ico svg { height: 16px; width: auto; display: block; overflow: visible; }
+  .mb .fake { opacity: .55; }
+  .lockups { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lockup { border-radius: 14px; height: 96px; display: flex; align-items: center; justify-content: center; gap: 14px; }
+  .lockup.l { background: #FAFAFA; color: #050506; border: 1px solid rgba(0,0,0,.07); }
+  .lockup.d { background: #050506; color: #F5F5F7; border: 1px solid rgba(255,255,255,.08); }
+  .lockup svg.g { height: 40px; width: auto; overflow: visible; }
+  .lockup svg.wm { height: 26px; width: auto; }
+  .actions { margin-top: 16px; display: flex; gap: 8px; }
+  .actions button {
+    border: 1px solid var(--line); background: transparent; color: var(--fg); font: 500 12px/1 inherit; font-family: inherit;
+    padding: 8px 12px; border-radius: 999px; cursor: pointer;
+  }
+  .actions button:hover { background: var(--chip); }
+  .glyph { overflow: visible; }
+  footer { color: var(--muted); font-size: 12.5px; padding-top: 28px; }
+  @media (max-width: 860px) {
+    .concept { grid-template-columns: 1fr; gap: 20px; }
+    .stage { max-width: 340px; margin: 0 auto; width: 100%; }
+    .states { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .menubars, .lockups { grid-template-columns: 1fr; }
+    .readout { margin-left: 0; }
+  }
+  @media (max-width: 420px) { .wrap { padding: 28px 16px 60px; } .bar { margin: 20px -16px 0; padding: 10px 16px; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs><symbol id="wm" viewBox="45 565 860 180"><path d="M86.67,701.81l-34.83-129.89h21.95l20.68,84.36,2.18,11.25h1.09l2.9-11.25,25.94-84.36h19.96l25.04,84.36,2.9,11.07h1.09l2.18-11.07,20.5-84.36h22.13l-34.29,129.89h-21.04l-25.04-86.17-2.9-12.16h-1.09l-2.9,12.16-25.94,86.17h-20.5Z"/><path d="M234.53,701.81v-129.89h19.59v35.56l-1.09,14.51h1.09c2.54-4.47,6.44-8.19,11.7-11.16,5.26-2.96,11.1-4.45,17.51-4.45,7.74,0,14.18,1.57,19.32,4.72,5.14,3.15,8.98,7.47,11.52,12.97,2.54,5.5,3.81,11.95,3.81,19.32v58.42h-19.41v-55.88c0-4.96-.94-9.01-2.81-12.15-1.88-3.14-4.33-5.5-7.35-7.08-3.03-1.57-6.41-2.36-10.16-2.36-4.72,0-8.89,1.33-12.52,3.99-3.63,2.66-6.47,6.14-8.53,10.43-2.06,4.29-3.08,8.86-3.08,13.7v49.35h-19.59Z"/><path d="M349.72,595.68c-3.63,0-6.74-1.3-9.34-3.9-2.6-2.6-3.9-5.71-3.9-9.34s1.3-6.86,3.9-9.34c2.6-2.48,5.71-3.72,9.34-3.72s6.89,1.24,9.43,3.72c2.54,2.48,3.81,5.6,3.81,9.34s-1.27,6.74-3.81,9.34c-2.54,2.6-5.69,3.9-9.43,3.9ZM339.93,701.81v-92.52h19.59v92.52h-19.59Z"/><path d="M415.94,704.71c-7.38,0-13.79-1.12-19.23-3.36-5.44-2.24-9.92-5.26-13.43-9.07-3.51-3.81-6.11-7.95-7.8-12.43l17.6-7.62c2.18,4.96,5.29,8.74,9.34,11.34,4.05,2.6,8.74,3.9,14.06,3.9,4.84,0,9.01-.88,12.52-2.63,3.51-1.75,5.26-4.63,5.26-8.62,0-2.54-.82-4.63-2.45-6.26s-3.81-2.99-6.53-4.08c-2.72-1.09-5.84-2.05-9.34-2.9l-11.07-2.54c-4.35-1.09-8.5-2.81-12.43-5.17-3.93-2.36-7.11-5.35-9.52-8.98-2.42-3.63-3.63-7.92-3.63-12.88,0-5.56,1.6-10.37,4.81-14.42,3.2-4.05,7.53-7.17,12.97-9.34s11.31-3.27,17.6-3.27c5.81,0,11.09.76,15.87,2.27,4.78,1.51,8.95,3.75,12.52,6.71,3.57,2.96,6.38,6.62,8.44,10.98l-16.87,7.62c-2.06-4.11-4.84-6.99-8.35-8.62-3.51-1.63-7.32-2.45-11.43-2.45-4.6,0-8.44.94-11.52,2.81-3.08,1.88-4.63,4.33-4.63,7.35s1.36,5.62,4.08,7.44c2.72,1.81,6.08,3.27,10.07,4.35l13.42,3.27c9.19,2.3,16.08,5.78,20.68,10.43,4.59,4.66,6.89,10.31,6.89,16.96,0,5.93-1.7,11.1-5.08,15.51-3.39,4.42-7.95,7.8-13.7,10.16-5.75,2.36-12.13,3.54-19.14,3.54Z"/><path d="M470.55,740.99v-131.71h18.5v12.52h1.09c1.69-2.66,3.96-5.17,6.8-7.53,2.84-2.36,6.2-4.26,10.07-5.71,3.87-1.45,8.16-2.18,12.88-2.18,8.46,0,16.02,2.12,22.68,6.35,6.65,4.24,11.94,10.04,15.87,17.42,3.93,7.38,5.9,15.85,5.9,25.4s-1.97,18.02-5.9,25.4c-3.93,7.38-9.22,13.18-15.87,17.42-6.65,4.23-14.21,6.35-22.68,6.35-7.02,0-13.12-1.57-18.32-4.72-5.2-3.14-9.01-6.65-11.43-10.52h-1.09l1.09,12.88v38.64h-19.59ZM516.99,686.75c4.84,0,9.4-1.27,13.7-3.81,4.29-2.54,7.74-6.17,10.34-10.88,2.6-4.72,3.9-10.22,3.9-16.51s-1.3-11.94-3.9-16.6c-2.6-4.65-6.05-8.25-10.34-10.79-4.29-2.54-8.86-3.81-13.7-3.81s-9.37,1.27-13.61,3.81c-4.23,2.54-7.68,6.14-10.34,10.79-2.66,4.66-3.99,10.19-3.99,16.6s1.33,11.95,3.99,16.6c2.66,4.66,6.11,8.25,10.34,10.79,4.23,2.54,8.77,3.81,13.61,3.81Z"/><path d="M581.94,701.81v-92.52h18.5v13.61h1.09c1.45-3.14,3.54-5.92,6.26-8.34,2.72-2.42,5.87-4.35,9.43-5.81,3.57-1.45,7.29-2.18,11.16-2.18,2.54,0,4.69.15,6.44.45,1.75.3,3.36.76,4.81,1.36v20.32c-2.3-.97-4.63-1.75-6.98-2.36-2.36-.6-4.81-.91-7.35-.91-4.6,0-8.68,1.24-12.25,3.72-3.57,2.48-6.38,5.78-8.44,9.89-2.06,4.11-3.08,8.71-3.08,13.79v48.98h-19.59Z"/><path d="M718.36,704.71c-9.31,0-18.08-1.69-26.31-5.08-8.23-3.38-15.45-8.13-21.68-14.24-6.23-6.11-11.13-13.3-14.7-21.59-3.57-8.28-5.35-17.26-5.35-26.94s1.78-18.66,5.35-26.94c3.57-8.28,8.46-15.48,14.7-21.59,6.23-6.11,13.45-10.85,21.68-14.24,8.22-3.38,16.99-5.08,26.31-5.08,9.92,0,19.08,1.75,27.49,5.26,8.4,3.51,15.45,8.41,21.13,14.69l-13.79,13.61c-2.78-3.14-5.96-5.81-9.52-7.98-3.57-2.18-7.47-3.84-11.7-4.99-4.24-1.15-8.77-1.72-13.61-1.72-6.41,0-12.52,1.15-18.32,3.45-5.8,2.3-10.92,5.6-15.33,9.89-4.42,4.29-7.89,9.43-10.43,15.42-2.54,5.99-3.81,12.73-3.81,20.23s1.3,14.24,3.9,20.23c2.6,5.99,6.11,11.13,10.52,15.42,4.41,4.29,9.52,7.59,15.33,9.89,5.81,2.3,11.91,3.45,18.32,3.45,5.92,0,11.46-.84,16.6-2.54,5.14-1.69,9.64-4.11,13.52-7.26,3.87-3.14,7.01-6.98,9.43-11.52,2.42-4.54,3.93-9.64,4.54-15.33h-44.45v-17.6h63.13c.24,1.45.48,3.12.73,4.99.24,1.88.36,3.66.36,5.35v.18c0,9.31-1.6,17.84-4.81,25.58-3.21,7.74-7.65,14.36-13.33,19.87-5.69,5.5-12.43,9.74-20.23,12.7s-16.36,4.44-25.67,4.44Z"/><path d="M846.62,704.71c-9.43,0-17.78-2.18-25.04-6.53-7.26-4.35-12.94-10.25-17.05-17.69-4.11-7.44-6.17-15.75-6.17-24.95s2.05-17.51,6.17-24.94c4.11-7.44,9.8-13.33,17.05-17.69,7.26-4.35,15.66-6.53,25.22-6.53s17.78,2.21,25.04,6.62c7.26,4.42,12.94,10.31,17.05,17.69,4.11,7.38,6.17,15.66,6.17,24.85s-2.06,17.51-6.17,24.95c-4.11,7.44-9.8,13.33-17.05,17.69-7.26,4.35-15.66,6.53-25.22,6.53ZM846.8,686.75c5.08,0,9.8-1.24,14.15-3.72,4.35-2.48,7.89-6.05,10.61-10.7,2.72-4.65,4.08-10.25,4.08-16.78s-1.36-12.12-4.08-16.78c-2.72-4.65-6.26-8.22-10.61-10.7-4.35-2.48-9.07-3.72-14.15-3.72s-9.83,1.24-14.24,3.72c-4.42,2.48-7.98,6.05-10.7,10.7-2.72,4.66-4.08,10.25-4.08,16.78s1.36,12.13,4.08,16.78c2.72,4.66,6.32,8.23,10.79,10.7,4.47,2.48,9.19,3.72,14.15,3.72Z"/></symbol></defs>
+</svg>
+
+<div class="wrap">
+  <header>
+    <h1>WhisprGo mark: four directions</h1>
+    <p>Every option keeps the brand's one rule: monochrome, with the dot as the only ornament. Each mark is a live system with four states — idle, listening, transcribing, done — driven by springs, so any state change can interrupt any other. Hold <b>space</b> (or press and hold an icon) to speak.</p>
+  </header>
+
+  <div class="bar">
+    <div class="grp"><span class="lbl">State</span>
+      <div class="seg" id="stateSeg">
+        <button data-s="auto" class="on">Auto</button>
+        <button data-s="idle">Idle</button>
+        <button data-s="listening">Listening</button>
+        <button data-s="transcribing">Transcribing</button>
+        <button data-s="done">Done</button>
+      </div>
+    </div>
+    <div class="grp"><span class="lbl">Speed</span>
+      <div class="seg" id="speedSeg">
+        <button data-v="1" class="on">1×</button>
+        <button data-v="0.25">¼×</button>
+        <button data-v="0.1">⅒×</button>
+      </div>
+    </div>
+    <div class="grp"><span class="lbl">Icon</span>
+      <div class="seg" id="tileSeg">
+        <button data-v="ink" class="on">Ink</button>
+        <button data-v="paper">Paper</button>
+      </div>
+    </div>
+    <div class="grp"><span class="lbl">Input</span>
+      <div class="seg" id="micSeg">
+        <button data-v="sim" class="on">Simulated</button>
+        <button data-v="mic">Microphone</button>
+      </div>
+    </div>
+    <div class="readout" id="readout"><span class="dot"></span><span id="readoutText">idle</span></div>
+  </div>
+
+  <main id="concepts"></main>
+  <footer>Concept board for WhisprGo. Sizes shown: 1024 hero, 128/64/32 Dock, 16 pt menu bar (template), and the horizontal lockup with the existing wordmark. Use ⅒× speed to check every frame.</footer>
+</div>
+
+<script>
+(() => {
+  const TAU = Math.PI * 2;
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smooth = t => { t = clamp(t); return t * t * (3 - 2 * t); };
+  const gauss = (x, s) => Math.exp(-(x * x) / (2 * s * s));
+  const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+  const noise = x => { const i = Math.floor(x), f = x - i; return lerp(hash(i), hash(i + 1), f * f * (3 - 2 * f)); };
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- squircle (superellipse) ----------
+  function squircle(a, n = 5, steps = 180) {
+    let d = '';
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps * TAU, c = Math.cos(t), s = Math.sin(t);
+      const x = a * Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
+      const y = a * Math.sign(s) * Math.pow(Math.abs(s), 2 / n);
+      d += (i ? 'L' : 'M') + x.toFixed(4) + ' ' + y.toFixed(4);
+    }
+    return d + 'Z';
+  }
+  const TILE = squircle(1.526);
+
+  // ---------- audio: simulated speech or microphone ----------
+  const NB = 16;
+  const audio = {
+    level: 0, bands: new Float32Array(NB), hist: new Float32Array(360), histAcc: 0,
+    mic: null, micData: null,
+    raw(t, listening) {
+      const out = new Float32Array(NB);
+      if (!listening) return { level: 0, bands: out };
+      if (this.mic) {
+        this.mic.getByteFrequencyData(this.micData);
+        let sum = 0;
+        for (let b = 0; b < NB; b++) {
+          const lo = Math.floor(Math.pow(b / NB, 1.6) * 90) + 1, hi = Math.floor(Math.pow((b + 1) / NB, 1.6) * 90) + 2;
+          let m = 0; for (let i = lo; i < hi; i++) m = Math.max(m, this.micData[i]);
+          out[b] = clamp((m / 255 - 0.28) * 1.7); sum += out[b];
+        }
+        return { level: clamp(sum / NB * 1.9), bands: out };
+      }
+      const ph = t % 3.3;
+      const gate = smooth(ph / 0.14) * smooth((2.7 - ph) / 0.2);
+      const syl = Math.pow(Math.max(0, Math.sin(TAU * (3.3 * t + 0.6 * Math.sin(t * 1.3)))), 1.3);
+      const env = gate * (0.22 + 0.78 * syl) * (0.6 + 0.4 * noise(t * 1.7 + 3));
+      for (let b = 0; b < NB; b++) {
+        const tilt = 1.15 - 0.9 * Math.abs(b / (NB - 1) - 0.32);
+        out[b] = clamp(env * (0.35 + 0.65 * noise(t * 7 + b * 3.1)) * tilt * 1.3);
+      }
+      return { level: clamp(env), bands: out };
+    },
+    update(dt, t, listening) {
+      const r = this.raw(t, listening);
+      const k = 1 - Math.exp(-dt * 22);
+      this.level += (r.level - this.level) * k;
+      for (let b = 0; b < NB; b++) this.bands[b] += (r.bands[b] - this.bands[b]) * k;
+      this.histAcc += dt;
+      while (this.histAcc >= 1 / 60) { this.histAcc -= 1 / 60; this.hist.copyWithin(1, 0); this.hist[0] = this.level; }
+    },
+    past(sec) { const i = Math.min(this.hist.length - 1, Math.floor(sec * 60)); return this.hist[i]; },
+  };
+
+  // =====================================================================
+  // CONCEPTS. Each builds a fixed set of dots (so every state change is a
+  // morph of the same objects) and writes spring targets per frame.
+  // =====================================================================
+
+  // ---- A. Meter ----
+  const A_MARK = [1, 3, 5, 7, 3, 5, 1];
+  const A = {
+    key: 'A', name: 'Meter',
+    blurb: 'The recording pill’s dot meter, squared up into an icon. The mark is literally what you watch while you talk, so the Dock icon, the menu bar and the overlay become one object. Lit dots taper toward the column ends for the soft, spoken feel of the current logo; unlit dots stay as faint graphite pins.',
+    states: {
+      idle: 'A fixed voiceprint with a slow breath running across the columns.',
+      listening: 'Columns become a live 7-band meter on bouncy springs.',
+      transcribing: 'Collapses to one row; a bump scans left to right.',
+      done: 'Columns land back into the mark one by one, with a small overshoot.',
+    },
+    glyphBox: '-1.02 -1.02 2.04 2.04',
+    build(variant) {
+      const dots = [], sp = 0.28;
+      for (let c = 0; c < 7; c++) for (let r = 0; r < 7; r++) dots.push({ c, r, x: (c - 3) * sp, y: (r - 3) * sp, rad: 0.03, o: 0.2 });
+      return dots;
+    },
+    target(dots, x) {
+      const small = x.variant === 'small';
+      const rOn = small ? 0.125 : 0.108, rOff = small ? 0 : 0.03, oOff = small ? 0 : 0.22;
+      const heights = new Array(7);
+      for (let c = 0; c < 7; c++) {
+        let h;
+        if (x.state === 'listening') { const b = x.audio.bands[[1, 3, 2, 5, 4, 8, 11][c]]; h = 1 + 6 * clamp((b - 0.1) * 1.45); }
+        else if (x.state === 'transcribing') { const p = (x.ts * 6.5) % 10 - 1.5; h = 1 + 2.4 * gauss(c - p, 0.75); }
+        else if (x.state === 'done') h = x.ts > c * 0.05 ? A_MARK[c] : 1;
+        else h = A_MARK[c];
+        heights[c] = h;
+      }
+      for (const d of dots) {
+        const off = Math.abs(d.r - 3), h = heights[d.c];
+        const lit = clamp(h / 2 - off + 0.5);
+        let taper = 1 - 0.3 * (off / 3);
+        if (x.state === 'idle' && !reduced) taper *= 1 + 0.045 * Math.sin(x.t * 1.5 - d.c * 0.7);
+        d.tx = d.x; d.ty = d.y;
+        d.tr = lerp(rOff, rOn * taper, lit); d.to = lerp(oOff, 1, lit);
+      }
+      if (x.state === 'listening') return [0.11, 0.72];
+      if (x.state === 'transcribing') return [0.2, 0.9];
+      if (x.state === 'done') return [0.36, 0.72];
+      return [0.42, 1];
+    },
+  };
+
+  // ---- B. Dot W ----
+  function wPath(N) {
+    const V = [[-0.92, -0.55], [-0.46, 0.55], [0, -0.22], [0.46, 0.55], [0.92, -0.55]];
+    const seg = []; let total = 0;
+    for (let i = 0; i < 4; i++) { const l = Math.hypot(V[i + 1][0] - V[i][0], V[i + 1][1] - V[i][1]); seg.push(l); total += l; }
+    const pts = [];
+    for (let k = 0; k < N; k++) {
+      let s = k / (N - 1) * total, i = 0;
+      while (i < 3 && s > seg[i]) { s -= seg[i]; i++; }
+      const f = s / seg[i];
+      pts.push([lerp(V[i][0], V[i + 1][0], f), lerp(V[i][1], V[i + 1][1], f)]);
+    }
+    return pts;
+  }
+  const B = {
+    key: 'B', name: 'Dot W',
+    blurb: 'A W drawn as a single line of dots, which is also a zig-zag waveform. It gives WhisprGo an ownable lettermark without leaving the dotted language. Because the dots are ordered left to right, the letter can flatten into a live voice trace and coil into a spinner without a single dot appearing or vanishing.',
+    states: {
+      idle: 'A whisper of light travels along the stroke of the W.',
+      listening: 'The W unfolds into an oscilloscope trace of your voice.',
+      transcribing: 'The trace opens into a ring; a comet of light circles it.',
+      done: 'Dots re-draw the W left to right, like a pen stroke.',
+    },
+    glyphBox: '-1.04 -1.04 2.08 2.08',
+    build(variant) {
+      const N = variant === 'small' ? 13 : 23, P = wPath(N);
+      return P.map(([px, py], i) => ({ i, N, s: i / (N - 1), wx: px, wy: py, x: px, y: py, rad: 0.07, o: 1 }));
+    },
+    target(dots, x) {
+      const small = x.variant === 'small';
+      for (const d of dots) {
+        const base = (small ? 0.105 : 0.078) * (0.82 + 0.18 * Math.sin(Math.PI * d.s));
+        // The line opens like an eye: even dots take the upper arc, odd dots the lower one, both
+        // still ordered left to right, so no dot ever crosses another. The ring stays put; only a
+        // comet of size and light travels around it.
+        const ringAt = ts => {
+          const a = d.i % 2 === 0 ? Math.PI + Math.PI * d.s : Math.PI - Math.PI * d.s;
+          let tail = ((a / TAU) - ts * 0.85) % 1; if (tail < 0) tail += 1;
+          const tt = Math.pow(tail, 2.2);
+          return [0.5 * Math.cos(a), 0.5 * Math.sin(a), base * (0.45 + 0.75 * tt), 0.25 + 0.75 * tt];
+        };
+        if (x.state === 'listening') {
+          const w = Math.pow(Math.sin(Math.PI * d.s), 1.2), L = x.audio.level;
+          d.tx = lerp(-0.95, 0.95, d.s);
+          d.ty = -L * 0.78 * w * (0.62 * Math.sin(TAU * (1.5 * d.s - x.t * 1.3)) + 0.38 * Math.sin(TAU * (3.4 * d.s + x.t * 0.8) + 1))
+                 - (x.audio.bands[d.i % NB] - 0.3) * 0.22 * w * L;
+          d.tr = base * (0.78 + 0.45 * L * w); d.to = 1;
+        } else if (x.state === 'transcribing') {
+          [d.tx, d.ty, d.tr, d.to] = ringAt(x.ts);
+        } else if (x.state === 'done' && x.ts < d.s * 0.35) {
+          [d.tx, d.ty, d.tr, d.to] = ringAt(x.ts);
+        } else {
+          let r = base;
+          if (x.state === 'idle' && !reduced) { const ph = (x.t * 0.34) % 1.7 - 0.35; r *= 1 + 0.32 * gauss(d.s - ph, 0.07); }
+          d.tx = d.wx; d.ty = d.wy; d.tr = r; d.to = 1;
+        }
+      }
+      if (x.state === 'listening') return [0.16, 0.86];
+      if (x.state === 'transcribing') return [0.32, 1];
+      if (x.state === 'done') return [0.4, 0.8];
+      return [0.42, 1];
+    },
+  };
+
+  // ---- C. Speak → Type ----
+  const C_ORB = [-0.3, 0], C_CX = 0.64, C_NC = 11, C_NP = 12;
+  const C = {
+    key: 'C', name: 'Speak → Type',
+    blurb: 'The whole product in two shapes: a voice and a text caret. While you talk, droplets bud off the voice with a liquid neck and merge into the cursor, which is exactly what WhisprGo does. It is the most explainable and the most legible at 16 pt, and the caret gives the brand a native idle animation: it blinks.',
+    states: {
+      idle: 'The caret blinks, waiting. The voice rests.',
+      listening: 'The voice swells with your level; words bud off and fly into the caret.',
+      transcribing: 'The voice condenses and the stream speeds up.',
+      done: 'The last words land, the caret kicks forward, the voice blooms back.',
+    },
+    goo: true,
+    glyphBox: '-0.82 -1.02 1.64 2.04',
+    build() {
+      const dots = [{ kind: 'orb', x: C_ORB[0], y: 0, rad: 0.42, o: 1 }];
+      for (let j = 0; j < C_NC; j++) dots.push({ kind: 'caret', j, x: C_CX, y: -0.46 + j * 0.092, rad: 0.07, o: 1 });
+      for (let k = 0; k < C_NP; k++) dots.push({ kind: 'p', k, p: 1, seed: hash(k * 9.3), x: C_ORB[0], y: 0, rad: 0, o: 1, direct: true });
+      return dots;
+    },
+    target(dots, x) {
+      const st = x.state;
+      const emitting = st === 'listening' ? x.audio.level > 0.28 : st === 'transcribing';
+      const speed = st === 'transcribing' ? 2.3 : 1.25 + x.audio.level;
+      let lastFree = 0;
+      for (const d of dots) {
+        if (d.kind === 'orb') {
+          d.tx = C_ORB[0]; d.ty = 0; d.to = 1;
+          if (st === 'listening') d.tr = 0.33 + 0.17 * x.audio.level;
+          else if (st === 'transcribing') d.tr = 0.25 + 0.025 * Math.sin(x.ts * 9);
+          else d.tr = 0.42 * (reduced ? 1 : 1 + 0.012 * Math.sin(x.t * 1.6));
+        } else if (d.kind === 'caret') {
+          const kick = st === 'done' ? 0.075 * gauss(x.ts - 0.42, 0.12) : 0;
+          d.tx = C_CX + kick; d.ty = -0.46 + d.j * 0.092; d.to = 1;
+          let on = 1;
+          if (st === 'idle' && !reduced) on = (x.t % 1.1) < 0.6 ? 1 : 0;
+          d.tr = on ? (x.variant === 'small' ? 0.1 : 0.07) : 0.012;
+        } else {
+          // Particles: phase 0 sits hidden inside the orb, phase 1 is absorbed into the caret.
+          if (d.p < 1) d.p = Math.min(1, d.p + x.dt * speed * (0.85 + 0.3 * d.seed));
+          else if (emitting && x.t - lastFree > 0.0) {
+            const gap = st === 'transcribing' ? 0.07 : 0.11;
+            if (x.t - (C.lastEmit[x.vid] || 0) > gap) { d.p = 0; d.ty0 = (d.seed - 0.5) * 0.7; C.lastEmit[x.vid] = x.t; lastFree = x.t; }
+          }
+          const p = d.p, e = p * p * (3 - 2 * p);
+          const ty = d.ty0 || 0;
+          d.tx = lerp(C_ORB[0], C_CX, e);
+          d.ty = lerp(0, ty, e) - Math.sin(Math.PI * p) * 0.16 * (d.seed > 0.5 ? 1 : -1);
+          d.tr = p >= 1 ? 0 : 0.105 * smooth(p / 0.12) * (1 - smooth((p - 0.82) / 0.18)) * lerp(1, 0.7, p);
+          d.to = 1;
+        }
+      }
+      if (st === 'listening') return [0.16, 0.8];
+      if (st === 'transcribing') return [0.24, 0.9];
+      if (st === 'done') return [0.46, 0.68];
+      return [0.12, 1];
+    },
+    lastEmit: {},
+  };
+
+  // ---- D. Ripple ----
+  const D = {
+    key: 'D', name: 'Ripple',
+    blurb: 'A halftone sound ripple: concentric rings of large and small dots, like a whisper spreading through still air. It is the most emblematic and premium of the four. While you speak, each ring carries your voice outward, so the outer rings show what you said a moment ago. The menu bar uses a reduced 19-dot cut, because a halftone needs size.',
+    states: {
+      idle: 'Rings drift outward very slowly.',
+      listening: 'Your level is emitted from the centre and travels out ring by ring.',
+      transcribing: 'A radar sweep circles the field.',
+      done: 'The field drains, then blooms back from the centre.',
+    },
+    glyphBox: '-1.02 -1.02 2.04 2.04',
+    build(variant) {
+      const sp = variant === 'small' ? 0.4 : 0.168, dots = [];
+      const rows = Math.ceil(1 / (sp * 0.866)) + 1;
+      for (let j = -rows; j <= rows; j++) for (let i = -rows - 2; i <= rows + 2; i++) {
+        const px = sp * (i + (Math.abs(j) % 2) * 0.5), py = sp * 0.866 * j, dd = Math.hypot(px, py);
+        if (dd <= (variant === 'small' ? 0.86 : 0.95)) dots.push({ x: px, y: py, d: dd, th: Math.atan2(py, px), rmax: sp * 0.47, rad: 0.02, o: 1 });
+      }
+      return dots;
+    },
+    target(dots, x) {
+      const small = x.variant === 'small';
+      const lam = small ? 0.8 : 0.42;
+      const idleR = (d, t) => {
+        const f = 0.5 + 0.5 * Math.cos(TAU * (d.d / lam - (reduced ? 0 : t * 0.11)));
+        return d.rmax * (small ? 0.45 + 0.55 * f * (1 - 0.35 * d.d) : 0.2 + 0.8 * f * (1 - 0.5 * d.d));
+      };
+      for (const d of dots) {
+        d.tx = d.x; d.ty = d.y; d.to = 1;
+        if (x.state === 'listening') {
+          const a = clamp(x.audio.past(d.d / 0.85) * 2.1);
+          const f = 0.5 + 0.5 * Math.cos(TAU * (d.d / (small ? 0.8 : 0.3) - x.t * 1.1));
+          d.tr = d.rmax * ((small ? 0.4 : 0.2) + (small ? 0.6 : 0.8) * a * (0.55 + 0.45 * f) * (small ? 1 : 1 - 0.55 * smooth((d.d - 0.5) / 0.45)));
+        } else if (x.state === 'transcribing') {
+          let delta = (x.ts * 4.2 - d.th) % TAU; if (delta < 0) delta += TAU;
+          const tail = Math.exp(-delta * 1.25);
+          d.tr = d.rmax * ((small ? 0.4 : 0.16) + 0.8 * tail * (0.35 + 0.65 * clamp(d.d * 1.4)));
+        } else if (x.state === 'done') {
+          const k = smooth(x.ts * 2.6 - 0.35 - d.d * 1.3);
+          d.tr = lerp(d.rmax * 0.12, idleR(d, x.t), k);
+        } else d.tr = idleR(d, x.t);
+      }
+      if (x.state === 'listening') return [0.1, 1];
+      if (x.state === 'transcribing') return [0.14, 1];
+      if (x.state === 'done') return [0.3, 0.76];
+      return [0.42, 1];
+    },
+  };
+
+  const CONCEPTS = [A, B, C, D];
+
+  // =====================================================================
+  // VIEW: one SVG rendering of one concept, with its own spring-driven dots.
+  // =====================================================================
+  const NS = 'http://www.w3.org/2000/svg';
+  let uid = 0;
+  const views = [];
+  class View {
+    constructor(concept, opt) {
+      this.c = concept; this.opt = opt; this.vid = 'v' + (uid++); this.visible = true;
+      this.dots = concept.build(opt.variant || 'full');
+      for (const d of this.dots) { d.vx = 0; d.vy = 0; d.vr = 0; d.vo = 0; d.cx = d.x; d.cy = d.y; d.cr = d.rad; d.co = d.o; }
+      const id = this.vid, tile = !!opt.tile;
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', tile ? '-1.9 -1.9 3.8 3.8' : concept.glyphBox);
+      svg.setAttribute('class', (tile ? 'tile' : 'glyph') + (opt.cls ? ' ' + opt.cls : ''));
+      if (opt.size) { svg.setAttribute('width', opt.size); svg.setAttribute('height', opt.size); }
+      const goo = concept.goo ? `<filter id="${id}-goo" filterUnits="userSpaceOnUse" x="-2" y="-2" width="4" height="4" color-interpolation-filters="sRGB">
+          <feGaussianBlur stdDeviation="0.045"/><feColorMatrix values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10"/></filter>` : '';
+      svg.innerHTML = `<defs>
+          <linearGradient id="${id}-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--t-bg0)"/><stop offset="1" style="stop-color:var(--t-bg1)"/></linearGradient>
+          <radialGradient id="${id}-dot" cx=".36" cy=".3" r=".8"><stop offset="0" style="stop-color:var(--d0)"/><stop offset=".5" style="stop-color:var(--d1)"/><stop offset="1" style="stop-color:var(--d2)"/></radialGradient>
+          ${goo}</defs>
+        ${tile ? `<path d="${TILE}" fill="url(#${id}-bg)"/><path d="${TILE}" fill="none" style="stroke:var(--t-rim)" stroke-width="0.012"/>` : ''}
+        <g ${tile ? 'transform="scale(0.92)"' : ''} ${concept.goo ? `filter="url(#${id}-goo)"` : ''} fill="${tile ? `url(#${id}-dot)` : 'currentColor'}"></g>`;
+      const g = svg.querySelector('g');
+      for (const d of this.dots) { const el = document.createElementNS(NS, 'circle'); d.el = el; g.appendChild(el); }
+      this.svg = svg;
+      this.write();
+    }
+    update(dt, ctx) {
+      const [resp, damp] = this.c.target(this.dots, { ...ctx, variant: this.opt.variant || 'full', vid: this.vid });
+      const k = Math.pow(TAU / resp, 2), cdamp = 4 * Math.PI * damp / resp;
+      const n = Math.max(1, Math.ceil(dt / (1 / 240))), h = dt / n;
+      for (const d of this.dots) {
+        if (d.direct) { d.cx = d.tx; d.cy = d.ty; d.cr = d.tr; d.co = d.to; continue; }
+        for (let i = 0; i < n; i++) {
+          d.vx += (-k * (d.cx - d.tx) - cdamp * d.vx) * h; d.cx += d.vx * h;
+          d.vy += (-k * (d.cy - d.ty) - cdamp * d.vy) * h; d.cy += d.vy * h;
+          d.vr += (-k * (d.cr - d.tr) - cdamp * d.vr) * h; d.cr += d.vr * h;
+          d.vo += (-k * (d.co - d.to) - cdamp * d.vo) * h; d.co += d.vo * h;
+        }
+      }
+      if (this.visible) this.write();
+    }
+    write() {
+      for (const d of this.dots) {
+        d.el.setAttribute('cx', d.cx.toFixed(4));
+        d.el.setAttribute('cy', d.cy.toFixed(4));
+        d.el.setAttribute('r', Math.max(0, d.cr).toFixed(4));
+        d.el.setAttribute('opacity', clamp(d.co).toFixed(3));
+      }
+    }
+  }
+  function mk(concept, opt) { const v = new View(concept, opt); views.push(v); return v.svg; }
+
+  // ---------- build the page ----------
+  const main = document.getElementById('concepts');
+  const stateLists = [];
+  for (const c of CONCEPTS) {
+    const sec = document.createElement('section');
+    sec.className = 'concept';
+    sec.innerHTML = `
+      <div class="stage" data-hold></div>
+      <div class="info">
+        <div class="eyebrow">Option ${c.key}</div>
+        <h2>${c.name}</h2>
+        <p>${c.blurb}</p>
+        <ul class="states">${['idle', 'listening', 'transcribing', 'done'].map(s => `<li data-s="${s}"><b>${s[0].toUpperCase() + s.slice(1)}</b>${c.states[s]}</li>`).join('')}</ul>
+        <div class="row sizes"></div>
+        <div class="menubars">
+          <div class="mb dark"><span class="ico"></span><span class="fake">⌁</span><span>Sat 7 Nov 9:41</span></div>
+          <div class="mb light"><span class="ico"></span><span class="fake">⌁</span><span>Sat 7 Nov 9:41</span></div>
+        </div>
+        <div class="lockups">
+          <div class="lockup l"><svg class="wm" viewBox="45 565 860 180" fill="currentColor"></svg></div>
+          <div class="lockup d"><svg class="wm" viewBox="45 565 860 180" fill="currentColor"></svg></div>
+        </div>
+        <div class="actions"><button data-dl="tile">Download icon SVG</button><button data-dl="glyph">Download glyph SVG</button></div>
+      </div>`;
+    main.appendChild(sec);
+    const stage = sec.querySelector('.stage');
+    const hero = mk(c, { tile: true, variant: 'full' });
+    stage.appendChild(hero);
+    const hint = document.createElement('div'); hint.className = 'hint'; hint.textContent = 'Press and hold to speak'; stage.appendChild(hint);
+    const sizes = sec.querySelector('.sizes');
+    for (const px of [128, 64, 32]) {
+      const w = document.createElement('div'); w.className = 'size';
+      w.appendChild(mk(c, { tile: true, variant: (px <= 32 && (c === B || c === C)) || (px <= 64 && c === D) ? 'small' : 'full', size: px }));
+      const s = document.createElement('span'); s.textContent = px + ' px'; w.appendChild(s); sizes.appendChild(w);
+    }
+    sec.querySelectorAll('.mb .ico').forEach(el => el.appendChild(mk(c, { variant: 'small' })));
+    sec.querySelectorAll('.lockup').forEach(el => { const g = mk(c, { variant: 'full', cls: 'g' }); el.insertBefore(g, el.firstChild); });
+    sec.querySelectorAll('svg.wm').forEach(el => el.innerHTML = document.getElementById('wm').innerHTML);
+    stateLists.push(sec.querySelector('.states'));
+    sec.querySelector('[data-dl="tile"]').onclick = () => download(hero, `WhisprGo-${c.key}-${c.name.replace(/\W+/g, '')}-icon.svg`, 1024);
+    sec.querySelector('[data-dl="glyph"]').onclick = () => download(sec.querySelector('.lockup.l svg.g'), `WhisprGo-${c.key}-${c.name.replace(/\W+/g, '')}-glyph.svg`, 512);
+  }
+
+  function download(svg, name, size) {
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', NS); clone.setAttribute('width', size); clone.setAttribute('height', size);
+    const cs = getComputedStyle(document.body);
+    let s = new XMLSerializer().serializeToString(clone);
+    for (const v of ['--t-bg0', '--t-bg1', '--t-rim', '--d0', '--d1', '--d2']) s = s.split(`var(${v})`).join(cs.getPropertyValue(v).trim());
+    s = s.replace(/fill="currentColor"/g, 'fill="#050506"');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([s], { type: 'image/svg+xml' })); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // Only animate what is on screen.
+  const io = new IntersectionObserver(es => es.forEach(e => { const v = views.find(v => v.svg === e.target); if (v) v.visible = e.isIntersecting; }));
+  views.forEach(v => io.observe(v.svg));
+
+  // ---------- state machine ----------
+  let mode = 'auto', state = 'idle', since = 0, simT = 0, speed = 1, holding = false;
+  const AUTO = { idle: [2.4, 'listening'], listening: [3.8, 'transcribing'], transcribing: [1.5, 'done'], done: [1.6, 'idle'] };
+  const SEQ = { transcribing: [1.3, 'done'], done: [1.5, 'idle'] };
+  function setState(s) { if (s === state) return; state = s; since = simT; reflect(); }
+  function reflect() {
+    stateLists.forEach(ul => ul.querySelectorAll('li').forEach(li => li.classList.toggle('on', li.dataset.s === state)));
+    document.getElementById('readoutText').textContent = state + (mode === 'auto' ? ' · auto' : '');
+    document.getElementById('readout').classList.toggle('live', state === 'listening');
+  }
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll('#stateSeg button').forEach(b => b.classList.toggle('on', b.dataset.s === m));
+    reflect();
+  }
+  document.querySelectorAll('#stateSeg button').forEach(b => b.onclick = () => {
+    const s = b.dataset.s;
+    if (s === 'auto') { setMode('auto'); } else { setMode(s); setState(s); }
+  });
+  const segPick = (id, fn) => document.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => {
+    document.querySelectorAll(`#${id} button`).forEach(x => x.classList.toggle('on', x === b)); fn(b.dataset.v, b);
+  });
+  segPick('speedSeg', v => speed = +v);
+  segPick('tileSeg', v => document.body.classList.toggle('paper', v === 'paper'));
+  segPick('micSeg', async (v, b) => {
+    if (v === 'sim') { audio.mic = null; return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const an = ac.createAnalyser(); an.fftSize = 256; an.smoothingTimeConstant = 0.5;
+      ac.createMediaStreamSource(stream).connect(an);
+      audio.mic = an; audio.micData = new Uint8Array(an.frequencyBinCount);
+    } catch (e) {
+      b.textContent = 'Mic blocked';
+      document.querySelectorAll('#micSeg button').forEach(x => x.classList.toggle('on', x.dataset.v === 'sim'));
+    }
+  });
+
+  function startHold() { if (holding) return; holding = true; setMode('hold'); setState('listening'); }
+  function endHold() { if (!holding) return; holding = false; setState('transcribing'); }
+  document.querySelectorAll('[data-hold]').forEach(el => {
+    el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); startHold(); });
+    el.addEventListener('pointerup', endHold);
+    el.addEventListener('pointercancel', endHold);
+  });
+  addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && e.target === document.body) { e.preventDefault(); startHold(); } });
+  addEventListener('keyup', e => { if (e.code === 'Space') { e.preventDefault(); endHold(); } });
+
+  // ---------- loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000) * speed; last = now;
+    simT += dt;
+    const ts = simT - since;
+    if (mode === 'auto' && ts > AUTO[state][0]) setState(AUTO[state][1]);
+    else if (mode === 'hold' && SEQ[state] && ts > SEQ[state][0]) setState(SEQ[state][1]);
+    audio.update(dt, simT, state === 'listening');
+    const ctx = { state, ts: simT - since, t: simT, dt, audio };
+    for (const v of views) v.update(dt, ctx);
+    requestAnimationFrame(frame);
+  }
+  reflect();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

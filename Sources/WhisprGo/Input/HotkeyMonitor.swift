@@ -141,6 +141,9 @@ final class HotkeyMonitor {
         case pushToTalkBegan
         case pushToTalkEnded
         case pushToTalkCancelled
+        /// The toggle chord was pressed while push-to-talk was recording.
+        /// The same recording continues hands-free instead of restarting.
+        case pushToTalkPromoted
         case toggle
         case toggleMode
         case cycleProfile
@@ -316,9 +319,20 @@ final class HotkeyMonitor {
         })
         activeModifierActions = nowActive
 
+        // Adding Shift to a held Fn turns the running hold into a toggle
+        // recording. Cancelling and restarting would drop everything said
+        // so far plus the microphone restart gap.
+        let promotesPushToTalk = pushToTalkIsActive
+            && nowActive.contains(.toggleDictation)
+            && !previouslyActive.contains(.toggleDictation)
+
         for action in previouslyActive.subtracting(nowActive) {
             if action == .pushToTalk {
-                finishModifierPushToTalk(cancelled: changedKeyIsDown)
+                if promotesPushToTalk {
+                    promotePushToTalk()
+                } else {
+                    finishModifierPushToTalk(cancelled: changedKeyIsDown)
+                }
             } else {
                 let shouldFire = !changedKeyIsDown
                     && modifierReleaseCandidates.contains(action)
@@ -343,6 +357,8 @@ final class HotkeyMonitor {
         for action in nowActive.subtracting(previouslyActive) {
             if action == .pushToTalk {
                 scheduleModifierPushToTalk()
+            } else if action == .toggleDictation, pushToTalkIsActive {
+                promotePushToTalk()
             } else if pushToTalkWasConsumed {
                 continue
             } else if action.firesModifierShortcutOnRelease {
@@ -381,6 +397,8 @@ final class HotkeyMonitor {
         if action == .pushToTalk {
             activeKeyPushToTalkCode = keyCode
             beginPushToTalk()
+        } else if action == .toggleDictation, pushToTalkIsActive {
+            promotePushToTalk()
         } else {
             consumePushToTalkIfNeeded()
             perform(action)
@@ -467,6 +485,16 @@ final class HotkeyMonitor {
         guard pushToTalkIsActive else { return }
         pushToTalkIsActive = false
         onEvent?(cancelled ? .pushToTalkCancelled : .pushToTalkEnded)
+    }
+
+    private func promotePushToTalk() {
+        pushToTalkWasConsumed = true
+        pendingPushToTalk?.cancel()
+        pendingPushToTalk = nil
+        activeKeyPushToTalkCode = nil
+        guard pushToTalkIsActive else { return }
+        pushToTalkIsActive = false
+        onEvent?(.pushToTalkPromoted)
     }
 
     private func consumePushToTalkIfNeeded() {

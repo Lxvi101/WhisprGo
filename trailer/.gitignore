@@ -1,0 +1,12 @@
+# renders and intermediates
+out/
+analysis/.venv/
+analysis/.cache/
+analysis/stems/
+analysis/work/
+analysis/work_spec.png
+# decoded audio (regenerate from audio/glossy-loop.m4a, see README)
+audio/*.wav
+audio/*.mp3
+app/node_modules/
+app/dist/

@@ -19,11 +19,20 @@ final class RecordingOverlay {
     private var previousTimestamp: CFTimeInterval = 0
     private var hideGeneration = 0
 
+    /// Transparent room around the pill for its soft shadow. The shadow
+    /// (radius 9, offset 3) needs roughly 2x its radius below the pill;
+    /// the old 8 pt margin clipped it into a hard edge.
+    private static let shadowMargin = CGSize(width: 32, height: 28)
+    /// Distance from the bottom of the visible frame to the pill itself.
+    private static let pillBottomInset: CGFloat = 30
+
     init(levelMeter: AudioLevelMeter) {
         self.levelMeter = levelMeter
     }
 
-    func show(_ state: State) {
+    /// `locked` draws the dotted ring that marks toggle (hands-free)
+    /// recording. Hold-to-talk recordings show the plain pill.
+    func show(_ state: State, locked: Bool = false) {
         pendingHide?.cancel()
         hideGeneration &+= 1
         ensurePanel()
@@ -32,6 +41,7 @@ final class RecordingOverlay {
         let wasVisible = panel.isVisible
         let screen = wasVisible ? currentScreen(of: panel) : position(panel)
         waveformView.setState(state)
+        waveformView.setLocked(state == .recording && locked, animated: wasVisible)
         if !wasVisible {
             panel.orderFrontRegardless()
         }
@@ -45,6 +55,11 @@ final class RecordingOverlay {
         } else {
             stopDisplayLink()
         }
+    }
+
+    /// Called when a held recording becomes a toggle recording mid-way.
+    func setLocked(_ locked: Bool) {
+        waveformView?.setLocked(locked, animated: panel?.isVisible == true)
     }
 
     func hide(after delay: TimeInterval = 0.14) {
@@ -77,7 +92,14 @@ final class RecordingOverlay {
     private func ensurePanel() {
         guard panel == nil else { return }
 
-        let content = WaveformOverlayView(frame: NSRect(x: 0, y: 0, width: 150, height: 56))
+        let pill = WaveformOverlayView.surfaceSize
+        let margin = Self.shadowMargin
+        let content = WaveformOverlayView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: pill.width + margin.width * 2,
+            height: pill.height + margin.height * 2
+        ))
         let panel = NSPanel(
             contentRect: content.bounds,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -115,7 +137,7 @@ final class RecordingOverlay {
         let visible = screen.visibleFrame
         panel.setFrameOrigin(NSPoint(
             x: visible.midX - panel.frame.width / 2,
-            y: visible.minY + 22
+            y: visible.minY + Self.pillBottomInset - Self.shadowMargin.height
         ))
         return screen
     }
@@ -165,7 +187,7 @@ private final class WaveformOverlayView: NSView {
         0.35, 0.50, 0.68, 0.84, 0.96, 1.0,
         0.96, 0.84, 0.68, 0.50, 0.35,
     ]
-    private static let surfaceSize = CGSize(width: 104, height: 40)
+    static let surfaceSize = CGSize(width: 104, height: 40)
 
     private struct MeterDot {
         let layer: CALayer
@@ -178,6 +200,12 @@ private final class WaveformOverlayView: NSView {
     private let surface = CALayer()
     private let dotsContainer = CALayer()
     private var dots: [MeterDot] = []
+    /// Dotted ring around the pill while recording hands-free. Same dot
+    /// size and rhythm as the meter so it reads as part of the mark.
+    private let lockRing = CAShapeLayer()
+    private static let lockRingGap: CGFloat = 6
+    private static let lockRingDotCount = 60
+    private var isLocked = false
     private let spinner = CAShapeLayer()
     private let errorMark = CATextLayer()
     private var lastRenderedLevel: Float = -1
@@ -206,6 +234,10 @@ private final class WaveformOverlayView: NSView {
         CATransaction.begin()
         CATransaction.setAnimationDuration(reduceMotion || previous == .hidden ? 0 : 0.22)
         dotsContainer.opacity = newState == .recording ? 1 : 0
+        if newState != .recording {
+            lockRing.opacity = 0
+            isLocked = false
+        }
         spinner.opacity = newState == .transcribing ? 1 : 0
         errorMark.opacity = newState == .error ? 1 : 0
         CATransaction.commit()
@@ -215,6 +247,40 @@ private final class WaveformOverlayView: NSView {
         } else {
             spinner.removeAnimation(forKey: "spin")
         }
+    }
+
+    func setLocked(_ locked: Bool, animated: Bool) {
+        let effective = locked && state == .recording
+        guard effective != isLocked else { return }
+        isLocked = effective
+        let fromOpacity = (lockRing.presentation() ?? lockRing).opacity
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        lockRing.opacity = effective ? 1 : 0
+        lockRing.transform = CATransform3DIdentity
+        CATransaction.commit()
+        lockRing.removeAllAnimations()
+        guard animated else { return }
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = fromOpacity
+        fade.toValue = effective ? 1 : 0
+        fade.duration = effective ? 0.18 : 0.14
+        fade.timingFunction = CAMediaTimingFunction(name: effective ? .easeOut : .easeIn)
+        lockRing.add(fade, forKey: "lockFade")
+
+        // Snap the ring in from slightly inside the pill; reduced motion
+        // keeps only the fade.
+        guard effective, !reduceMotion else { return }
+        let spring = CASpringAnimation(keyPath: "transform.scale")
+        spring.fromValue = 0.92
+        spring.toValue = 1
+        spring.mass = 1
+        spring.stiffness = 340
+        spring.damping = 24
+        spring.duration = spring.settlingDuration
+        lockRing.add(spring, forKey: "lockScale")
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -236,6 +302,7 @@ private final class WaveformOverlayView: NSView {
         for dot in dots {
             dot.layer.backgroundColor = ink.withAlphaComponent(0.92).cgColor
         }
+        lockRing.strokeColor = ink.withAlphaComponent(0.92).cgColor
         spinner.strokeColor = ink.cgColor
         errorMark.foregroundColor = ink.cgColor
         CATransaction.commit()
@@ -378,6 +445,26 @@ private final class WaveformOverlayView: NSView {
                 ))
             }
         }
+
+        let gap = Self.lockRingGap
+        let ringBounds = surface.bounds.insetBy(dx: -gap, dy: -gap)
+        let ringRadius = ringBounds.height / 2
+        lockRing.frame = surface.bounds
+        lockRing.path = CGPath(
+            roundedRect: ringBounds,
+            cornerWidth: ringRadius,
+            cornerHeight: ringRadius,
+            transform: nil
+        )
+        // Zero-length dashes with round caps draw dots; spacing divides the
+        // perimeter evenly so no two dots crowd where the path closes.
+        let perimeter = 2 * (ringBounds.width - ringBounds.height) + .pi * ringBounds.height
+        lockRing.fillColor = nil
+        lockRing.lineWidth = 2.2
+        lockRing.lineCap = .round
+        lockRing.lineDashPattern = [0, NSNumber(value: Double(perimeter) / Double(Self.lockRingDotCount))]
+        lockRing.opacity = 0
+        surface.addSublayer(lockRing)
 
         spinner.frame = CGRect(x: meterCenterX - 9, y: size.height / 2 - 9, width: 18, height: 18)
         spinner.path = CGPath(

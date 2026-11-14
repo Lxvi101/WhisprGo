@@ -953,6 +953,16 @@ final class DictationEngine: ObservableObject {
             activity = .idle
             overlay.hide(after: 0)
 
+        case .pushToTalkPromoted:
+            guard activity == .recording, recordingMode == .pushToTalk else {
+                // Push-to-talk never started (for example, missing
+                // permissions), so treat the chord as a plain toggle.
+                toggleDictation()
+                return
+            }
+            recordingMode = .toggle
+            overlay.setLocked(true)
+
         case .toggle:
             toggleDictation()
 
@@ -991,7 +1001,7 @@ final class DictationEngine: ObservableObject {
             insertionTarget = target
             recordingMode = mode
             activity = .recording
-            overlay.show(.recording)
+            overlay.show(.recording, locked: mode == .toggle)
             recordingContext = nil
 
             // Let the recording overlay commit its first frame before the
