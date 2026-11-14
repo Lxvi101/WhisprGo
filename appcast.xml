@@ -6,6 +6,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>WhisprGo</title>
         <item>
+            <title>1.5.1</title>
+            <pubDate>Sat, 14 Nov 2026 10:47:27 +0100</pubDate>
+            <link>https://github.com/Lxvi101/WhisprGo/releases/tag/v1.5.1</link>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.5.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Lxvi101/WhisprGo/releases/download/v1.5.1/WhisprGo-1.5.1.dmg" length="11484865" type="application/octet-stream" sparkle:edSignature="n+jrMYS0jiMmZgRbaaVdFgm41w7ZDwuEKP0mJZyh6/cvOGbvDovGiKkAK3zX6AXK5k2l828FYqT0VHrB6zY1Ag=="/>
+        </item>
+        <item>
             <title>1.5.0</title>
             <pubDate>Fri, 13 Nov 2026 17:36:40 +0100</pubDate>
             <link>https://github.com/Lxvi101/WhisprGo/releases/tag/v1.5.0</link>
@@ -25,19 +35,9 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/Lxvi101/WhisprGo/releases/download/v1.4.0/WhisprGo-1.4.0.dmg" length="10916977" type="application/octet-stream" sparkle:edSignature="lu97egnCh4KR4Uz0XxYwYOJ94kgnxsU7job0f8o15CyYgsp4nd6c/918Of4Ttak6zhkQgBzai90LP8F3P04yCg=="/>
         </item>
-        <item>
-            <title>1.3.0</title>
-            <pubDate>Wed, 30 Sep 2026 11:34:46 +0200</pubDate>
-            <link>https://github.com/Lxvi101/WhisprGo/releases/tag/v1.3.0</link>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/Lxvi101/WhisprGo/releases/download/v1.3.0/WhisprGo-1.3.0.dmg" length="4944709" type="application/octet-stream" sparkle:edSignature="NNuml20zfxWuWtrChCkfDp4hAcVZUWNlsMx3hwRsts4zbFFSlAcmoE3qxGwf+NRwTJhWPVTdJktWrTtrnXmYDg=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: 9i0sCrSNixEGKggtcialxSrUu/GqvdzxK5CSjgEZvCPkm0t4WcypLqfBXSY9woAVRh/ffriBxA3ngoxHER6PBg==
-length: 2714
+edSignature: Ft1tKrzMzGF5pi3iYk7xKYwBcw6dbEIHFzKDASikB/4IFQDnJrTQNhEE2pFTh/T8cWPjzD6XKFGIkVWfx4DwDw==
+length: 2715
 -->
